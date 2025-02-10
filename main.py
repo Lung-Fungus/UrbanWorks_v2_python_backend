@@ -1,11 +1,12 @@
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from chat_backend import app as chat_app
 from proposal_generator import app as proposal_app
 from social_media_backend import app as social_app
 from image_generation import app as image_app
 from firestore_upload import app as upload_app
+from auth_middleware import firebase_auth
 
 # Create main FastAPI app
 app = FastAPI()
@@ -18,6 +19,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add auth dependency to all routes except health checks
+@app.middleware("http")
+async def add_auth_dependency(request, call_next):
+    path = request.url.path
+    if not path.endswith("/health") and path != "/":
+        # Add auth dependency to request
+        request.state.dependencies = [Depends(firebase_auth)]
+    return await call_next(request)
 
 # Mount all the sub-applications
 app.mount("/chat", chat_app)

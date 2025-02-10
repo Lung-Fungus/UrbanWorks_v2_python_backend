@@ -2,7 +2,8 @@ import os
 import json
 from pathlib import Path
 import firebase_admin
-from firebase_admin import credentials, storage
+from firebase_admin import credentials, storage, auth
+from fastapi import HTTPException
 
 def is_replit():
     """Check if we're running on Replit"""
@@ -119,6 +120,28 @@ def initialize_firebase():
         except Exception as e:
             print(f"Firebase initialization error: {str(e)}")
             raise
+
+def verify_firebase_token(token: str) -> dict:
+    """
+    Verify Firebase ID token and return user info
+    
+    Args:
+        token (str): Firebase ID token
+        
+    Returns:
+        dict: User info from decoded token
+        
+    Raises:
+        HTTPException: If token is invalid
+    """
+    try:
+        decoded_token = auth.verify_id_token(token)
+        return decoded_token
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid authentication credentials: {str(e)}"
+        )
 
 if __name__ == "__main__":
     initialize_environment() 
