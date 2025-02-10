@@ -323,7 +323,7 @@ def create_agent_node():
 
 {f'<tool_response>\n{tool_response}\n</tool_response>' if tool_response else ''}
 
-<files>{str(files or [])}</files>"""
+<files>" + str(files or []) + "</files>"""
 
             # Get response from Clarke with context using llm_with_tools
             response = llm_with_tools.invoke([HumanMessage(content=context)], system=CLARKE_SYSTEM_MESSAGE)
