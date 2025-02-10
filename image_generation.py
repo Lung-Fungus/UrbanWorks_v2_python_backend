@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from auth_middleware import firebase_auth
 from fastapi.middleware.cors import CORSMiddleware
 import replicate
 import anthropic
@@ -68,7 +69,7 @@ async def improve_prompt(prompt: str) -> str:
     return response.content[0].text
 
 @app.post("/improve-prompt")
-async def improve_prompt_endpoint(prompt: str = Form(...)):
+async def improve_prompt_endpoint(prompt: str = Form(...), user_data: dict = Depends(firebase_auth)):
     try:
         improved_prompt = await improve_prompt(prompt)
         return {"improved_prompt": improved_prompt}
@@ -77,6 +78,7 @@ async def improve_prompt_endpoint(prompt: str = Form(...)):
 
 @app.post("/generate")
 async def generate_image(
+    user_data: dict = Depends(firebase_auth),
     prompt: str = Form(...),
     aspect_ratio: str = Form("1:1"),
     raw: bool = Form(False),
