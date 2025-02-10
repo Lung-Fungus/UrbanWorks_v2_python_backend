@@ -194,15 +194,17 @@ async def generate_image(user_data: dict = Depends(firebase_auth),
                     print(f"Prompt: {prompt}")
                     print(f"Parameters: {data['parameters']}")
 
-                    # Get auth token from request state
-                    auth_header = {'Authorization': f'Bearer {user_data["id_token"]}'}
+                    # Extract token from user_data properly
+                    token = user_data.get('id_token') or user_data.get('stsTokenManager', {}).get('accessToken')
+                    if not token:
+                        raise HTTPException(status_code=401, detail="No valid authentication token found")
 
                     # Make the request with both files and form data, following redirects
                     upload_response = await client.post(
                         f'{API_BASE_URL}/upload',
                         files=files,
                         data=data,
-                        headers=auth_header,
+                        headers={'Authorization': f'Bearer {token}'},
                         follow_redirects=True,
                         verify=False  # Skip SSL verification for internal requests
                     )
