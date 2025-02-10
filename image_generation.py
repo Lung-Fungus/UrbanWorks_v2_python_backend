@@ -194,7 +194,7 @@ async def generate_image(
 
                     # Make the request with both files and form data
                     upload_response = await client.post(
-                        '/upload',
+                        f'{API_BASE_URL}/upload',
                         files=files,
                         data=data
                     )
