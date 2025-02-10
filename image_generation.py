@@ -33,7 +33,7 @@ if not firebase_admin._apps:
         'storageBucket': firebase_config["storageBucket"]
     })
 
-bucket = storage.bucket()
+bucket = storage.bucket(os.environ.get("FIREBASE_STORAGE_BUCKET"))
 print(f"Firebase initialized successfully with bucket: {bucket.name}")
 
 # Test bucket existence
@@ -54,7 +54,7 @@ async def improve_prompt(prompt: str) -> str:
     Your task is to improve the given prompt to create more detailed and visually appealing images.
     Focus on adding details about style, lighting, composition, and mood while maintaining the original intent.
     Return only the improved prompt without any explanations."""
-    
+
     response = claude_client.messages.create(
         model="claude-3-5-sonnet-20240620",
         max_tokens=200,
@@ -66,7 +66,7 @@ async def improve_prompt(prompt: str) -> str:
             }
         ]
     )
-    
+
     return response.content[0].text
 
 @app.post("/improve-prompt")
@@ -114,10 +114,10 @@ async def generate_image(
             "safety_tolerance": 6,
             "output_format": output_format
         }
-        
+
         if seed is not None:
             generation_params["seed"] = seed
-            
+
         if image_prompt_url:
             generation_params["image_prompt"] = image_prompt_url
             generation_params["image_prompt_strength"] = image_prompt_strength
@@ -131,7 +131,7 @@ async def generate_image(
                 "black-forest-labs/flux-1.1-pro-ultra",
                 input=generation_params
             )
-            
+
             # Ensure output is a string (URL)
             if isinstance(output, list) and len(output) > 0:
                 output_url = output[0]
@@ -149,7 +149,7 @@ async def generate_image(
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"generated_image_{timestamp}.{output_format}"
                 print(f"Preparing to upload with filename: {filename}")
-                
+
                 # Create file-like object for the image
                 files = {
                     'file': (
@@ -159,11 +159,11 @@ async def generate_image(
                     )
                 }
                 print(f"Uploading generated image with content type: image/{output_format}")
-                
+
                 # Upload to Firebase using the upload endpoint
                 async with httpx.AsyncClient() as client:
                     print("Making upload request to storage endpoint...")
-                    
+
                     # Create multipart form data
                     files = {
                         'file': (
@@ -172,7 +172,7 @@ async def generate_image(
                             f'image/{output_format}'
                         )
                     }
-                    
+
                     # Add metadata fields
                     data = {
                         'prompt': prompt,  # Send prompt directly
@@ -186,30 +186,30 @@ async def generate_image(
                             "image_prompt_strength": image_prompt_strength if image_prompt_url else None
                         })
                     }
-                    
+
                     print(f"Uploading with metadata:")
                     print(f"Prompt: {prompt}")
                     print(f"Parameters: {data['parameters']}")
-                    
+
                     # Make the request with both files and form data
                     upload_response = await client.post(
                         '/upload',
                         files=files,
                         data=data
                     )
-                    
+
                     print(f"Upload response status: {upload_response.status_code}")
-                    
+
                     if upload_response.status_code != 200:
                         error_text = await upload_response.aread()
                         raise Exception(f"Failed to upload generated image. Status: {upload_response.status_code}, Response: {error_text}")
-                    
+
                     response_text = await upload_response.aread()
                     upload_data = json.loads(response_text.decode('utf-8'))
                     firebase_url = upload_data['url']
                     storage_path = upload_data['storage_path']
                     print(f"Upload successful. Firebase URL: {firebase_url}, Storage path: {storage_path}")
-                
+
         except Exception as e:
             print(f"Error during image generation/upload: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
@@ -226,7 +226,7 @@ async def generate_image(
             "image_prompt_strength": image_prompt_strength if image_prompt_url else None,
             "storage_path": storage_path
         }
-        
+
         print("Preparing response data...")
         # Return both the original Replicate URL and the Firebase storage URL
         image_data = {
@@ -252,17 +252,17 @@ async def delete_image(storage_path: str):
         async with httpx.AsyncClient() as client:
             # The firestore_upload endpoint expects 'path' not 'storage_path'
             response = await client.delete(f'/upload/delete?path={storage_path}')
-            
+
             if response.status_code != 200:
                 response_text = await response.aread()
                 raise HTTPException(
                     status_code=response.status_code,
                     detail=f"Failed to delete image: {response_text.decode('utf-8')}"
                 )
-            
+
             print("Image deleted successfully")
             return {"success": True, "message": "Image deleted successfully"}
-            
+
     except HTTPException as he:
         print(f"HTTP error deleting image: {he.detail}")
         raise he

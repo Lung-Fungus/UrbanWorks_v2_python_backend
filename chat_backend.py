@@ -20,6 +20,7 @@ from langgraph.prebuilt import ToolNode
 from langchain.tools import Tool
 from fastapi.responses import Response
 from config import get_api_keys, get_firebase_credentials, initialize_environment
+import json
 
 # Initialize environment
 initialize_environment()
@@ -299,15 +300,15 @@ def create_agent_node():
                 return state
 
             # Format conversation history
-            conversation_history = "\n\n".join([
-                f"{'User' if isinstance(msg, HumanMessage) else 'Assistant'}: {msg.content}"
-                for msg in messages[:-1]
-            ])
+            conversation_history = "\\n\\n".join(
+                [
+                    f"{'User' if isinstance(msg, HumanMessage) else 'Assistant'}: {msg.content}"
+                    for msg in messages[:-1]
+                ]
+            )
 
             # Format context for the LLM
-            context = f"""<conversation_history>
-{conversation_history if conversation_history else 'No previous messages'}
-</conversation_history>
+            context = f"""<conversation_history>{conversation_history if conversation_history else 'No previous messages'}</conversation_history>
 
 <user_message>
 {last_message.content}
@@ -321,35 +322,20 @@ def create_agent_node():
 {current_date}
 </current_date>
 
-{f'<tool_response>\n{tool_response}\n</tool_response>' if tool_response else ''}
-
-<files>{str(files) if files else "[]"}</files>"""
+"""
+            context += f"""
+{f'<tool_response>{json.dumps(tool_response)}</tool_response>' if tool_response else ''}
+<files>{json.dumps(files) if files else '[]'}</files>
+"""
 
             # Get response from Clarke with context using llm_with_tools
-            response = llm_with_tools.invoke([HumanMessage(content=context)], system=CLARKE_SYSTEM_MESSAGE)
+            response = llm_with_tools.invoke([HumanMessage(content=context)], system=CLARKE_SYSTEM_MESSAGE, tool_response=tool_response)
             content = response.content.strip()
 
-            # Look for a tool call block in the response
-            tool_calls_match = re.search(r'<tool_calls>([\s\S]*?)</tool_calls>', content)
-            extracted_tool_calls = None
-            if tool_calls_match:
-                tool_calls_text = tool_calls_match.group(1).strip()
-                # Example parsing assuming one tool call in the format:
-                # <tool>tool_name</tool>
-                # <input>tool input</input>
-                tool_name_match = re.search(r'<tool>(.*?)</tool>', tool_calls_text)
-                tool_input_match = re.search(r'<input>(.*?)</input>', tool_calls_text)
-                extracted_tool = {}
-                if tool_name_match:
-                    extracted_tool["name"] = tool_name_match.group(1).strip()
-                if tool_input_match:
-                    # In this example we assume a single key "query" for the tool's input
-                    extracted_tool["args"] = {"query": tool_input_match.group(1).strip()}
-                if extracted_tool:
-                    extracted_tool["id"] = str(uuid.uuid4())
-                extracted_tool_calls = [extracted_tool] if extracted_tool else None
-                # Remove the tool_calls block from the content so that the final message looks clean
-                content = re.sub(r'<tool_calls>[\s\S]*?</tool_calls>', '', content, flags=re.DOTALL).strip()
+            # Check for tool calls in the response
+            extracted_tool_calls = []
+            for tool_call in response.tool_calls:
+                extracted_tool_calls.append(tool_call)
 
             # Parse the analysis section
             analysis_match = re.search(r'<analysis>([\s\S]*?)</analysis>', content)

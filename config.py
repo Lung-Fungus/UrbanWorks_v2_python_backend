@@ -1,6 +1,8 @@
 import os
 import json
 from pathlib import Path
+import firebase_admin
+from firebase_admin import credentials
 
 def is_replit():
     """Check if we're running on Replit"""
@@ -64,7 +66,7 @@ def initialize_environment():
         print("Running on Replit - using secrets for configuration")
     else:
         print("Running locally - using .env.local for configuration")
-    
+
     # Test all required environment variables
     required_vars = [
         "ANTHROPIC_API_KEY",
@@ -77,22 +79,27 @@ def initialize_environment():
         "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
         "NEXT_PUBLIC_FIREBASE_APP_ID"
     ]
-    
+
     missing_vars = []
     for var in required_vars:
         if not get_env_var(var):
             missing_vars.append(var)
-    
+
     if missing_vars:
         raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-    
+
     # Test Firebase credentials
     try:
         get_firebase_credentials()
     except Exception as e:
         raise ValueError(f"Failed to load Firebase credentials: {str(e)}")
-    
+
     print("Environment initialized successfully")
+
+def initialize_firebase():
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(get_firebase_credentials())
+        firebase_admin.initialize_app(cred, {'storageBucket': os.environ.get("FIREBASE_STORAGE_BUCKET")})
 
 if __name__ == "__main__":
     initialize_environment() 
