@@ -194,12 +194,17 @@ async def generate_image(user_data: dict = Depends(firebase_auth),
                     print(f"Prompt: {prompt}")
                     print(f"Parameters: {data['parameters']}")
 
+                    # Get auth token from request state
+                    auth_header = {'Authorization': f'Bearer {user_data["id_token"]}'}
+
                     # Make the request with both files and form data, following redirects
                     upload_response = await client.post(
                         f'{API_BASE_URL}/upload',
                         files=files,
                         data=data,
-                        follow_redirects=True
+                        headers=auth_header,
+                        follow_redirects=True,
+                        verify=False  # Skip SSL verification for internal requests
                     )
 
                     print(f"Upload response status: {upload_response.status_code}")
