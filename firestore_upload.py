@@ -4,8 +4,10 @@ import firebase_admin
 from firebase_admin import credentials, storage
 import os
 from datetime import datetime
-from typing import Optional
-from pathlib import Path
+from config import get_firebase_credentials, initialize_environment, get_firebase_config
+
+# Initialize environment
+initialize_environment()
 
 app = FastAPI()
 
@@ -20,14 +22,14 @@ app.add_middleware(
 
 # Initialize Firebase Admin
 try:
-    current_dir = Path(__file__).parent.absolute()
-    cred_path = current_dir / "firebase-credentials.json"
-    cred = credentials.Certificate(str(cred_path))
-    
-    # Initialize with storage bucket
-    firebase_admin.initialize_app(cred, {
-        'storageBucket': 'urbanworks-v2.firebasestorage.app'  # Correct bucket name from Firebase Console
-    })
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(get_firebase_credentials())
+        firebase_config = get_firebase_config()
+        
+        # Initialize with storage bucket
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': firebase_config["storageBucket"]
+        })
     
     # Get default bucket
     bucket = storage.bucket()

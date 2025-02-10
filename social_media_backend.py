@@ -7,32 +7,20 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.settings import ModelSettings
 import firebase_admin
 from firebase_admin import credentials, firestore
-from pathlib import Path
-from dotenv import load_dotenv
-import os
 from fastapi.middleware.cors import CORSMiddleware
 import re
+from config import get_api_keys, get_firebase_credentials, initialize_environment
 
+# Initialize environment
+initialize_environment()
 
-# Load environment variables
-root_dir = Path(__file__).parent.parent.parent
-env_path = root_dir / '.env.local'
-if env_path.exists():
-    load_dotenv(env_path)
-else:
-    env_path = root_dir / '.env'
-    load_dotenv(env_path)
-
-# Get Anthropic API key
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-if not ANTHROPIC_API_KEY:
-    raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+# Get API keys
+api_keys = get_api_keys()
+ANTHROPIC_API_KEY = api_keys["ANTHROPIC_API_KEY"]
 
 # Initialize Firebase Admin
 if not firebase_admin._apps:
-    current_dir = Path(__file__).parent.absolute()
-    cred_path = current_dir / "firebase-credentials.json"
-    cred = credentials.Certificate(str(cred_path))
+    cred = credentials.Certificate(get_firebase_credentials())
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()

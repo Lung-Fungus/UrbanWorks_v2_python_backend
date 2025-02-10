@@ -12,8 +12,6 @@ import anthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.outputs import ChatGeneration, ChatResult
-from pathlib import Path
-from dotenv import load_dotenv
 from tavily import TavilyClient
 import re
 import uuid
@@ -21,19 +19,15 @@ from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import ToolNode
 from langchain.tools import Tool
 from fastapi.responses import Response
+from config import get_api_keys, get_firebase_credentials, initialize_environment
 
-# Load environment variables from root .env.local
-root_dir = Path(__file__).parent.parent.parent
-env_path = root_dir / '.env.local'
-load_dotenv(env_path)
+# Initialize environment
+initialize_environment()
 
 # Get API keys
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-if not ANTHROPIC_API_KEY:
-    raise ValueError("ANTHROPIC_API_KEY environment variable is not set in .env.local")
-if not TAVILY_API_KEY:
-    raise ValueError("TAVILY_API_KEY environment variable is not set in .env.local")
+api_keys = get_api_keys()
+ANTHROPIC_API_KEY = api_keys["ANTHROPIC_API_KEY"]
+TAVILY_API_KEY = api_keys["TAVILY_API_KEY"]
 
 # Initialize clients
 tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
@@ -110,9 +104,7 @@ class CustomChatAnthropic(BaseChatModel):
 
 # Initialize Firebase Admin if not already initialized
 if not firebase_admin._apps:
-    current_dir = Path(__file__).parent.absolute()
-    cred_path = current_dir.parent / "proposal_generator" / "firebase-credentials.json"
-    cred = credentials.Certificate(str(cred_path))
+    cred = credentials.Certificate(get_firebase_credentials())
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()

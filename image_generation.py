@@ -7,16 +7,12 @@ from typing import Optional
 import firebase_admin
 from firebase_admin import credentials, storage
 from datetime import datetime
-from pathlib import Path
-from dotenv import load_dotenv
 import httpx
 import json
-import aiohttp
-import io
+from config import get_api_keys, get_firebase_credentials, initialize_environment, get_firebase_config
 
-# Load environment variables from .env.local
-env_path = Path(__file__).parent.parent.parent / '.env.local'
-load_dotenv(env_path)
+# Initialize environment
+initialize_environment()
 
 app = FastAPI()
 
@@ -31,11 +27,10 @@ app.add_middleware(
 
 # Initialize Firebase Admin if not already initialized
 if not firebase_admin._apps:
-    current_dir = Path(__file__).parent.absolute()
-    cred_path = current_dir.parent / "firestore" / "firebase-credentials.json"
-    cred = credentials.Certificate(str(cred_path))
+    cred = credentials.Certificate(get_firebase_credentials())
+    firebase_config = get_firebase_config()
     firebase_admin.initialize_app(cred, {
-        'storageBucket': 'urbanworks-v2.firebasestorage.app'
+        'storageBucket': firebase_config["storageBucket"]
     })
 
 bucket = storage.bucket()
@@ -47,9 +42,12 @@ if not bucket.exists():
 else:
     print("Bucket exists and is accessible")
 
+# Get API keys
+api_keys = get_api_keys()
+
 # Initialize clients
-replicate_client = replicate.Client(api_token=os.getenv("REPLICATE_API_TOKEN"))
-claude_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+replicate_client = replicate.Client(api_token=api_keys["REPLICATE_API_TOKEN"])
+claude_client = anthropic.Anthropic(api_key=api_keys["ANTHROPIC_API_KEY"])
 
 async def improve_prompt(prompt: str) -> str:
     system_prompt = """You are an expert at writing prompts for FLUX image generation. 
