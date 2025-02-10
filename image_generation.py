@@ -27,11 +27,8 @@ app.add_middleware(
 
 # Initialize Firebase Admin if not already initialized
 if not firebase_admin._apps:
-    cred = credentials.Certificate(get_firebase_credentials())
-    firebase_config = get_firebase_config()
-    firebase_admin.initialize_app(cred, {
-        'storageBucket': firebase_config["storageBucket"]
-    })
+    from config import initialize_firebase
+    initialize_firebase()
 
 # Get Firebase config for bucket name
 firebase_config = get_firebase_config()

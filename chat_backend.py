@@ -105,8 +105,8 @@ class CustomChatAnthropic(BaseChatModel):
 
 # Initialize Firebase Admin if not already initialized
 if not firebase_admin._apps:
-    cred = credentials.Certificate(get_firebase_credentials())
-    firebase_admin.initialize_app(cred)
+    from config import initialize_firebase
+    initialize_firebase()
 
 db = firestore.client()
 
