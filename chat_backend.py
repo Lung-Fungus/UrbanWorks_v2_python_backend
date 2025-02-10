@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from auth_middleware import firebase_auth
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, TypedDict, Annotated, Any
@@ -425,7 +426,7 @@ async def graph_visualization():
         raise HTTPException(status_code=500, detail="Error generating graph visualization")
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
     try:
         # Log incoming request
         logger.info("=== NEW CHAT REQUEST ===")

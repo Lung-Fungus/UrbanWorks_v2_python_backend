@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from auth_middleware import firebase_auth
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, TypedDict, Annotated, Any
@@ -565,7 +566,7 @@ class ChatRequest(BaseModel):
     conversation_id: str
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
     try:
         # Get the proposal document first to get the context
         proposal_ref = db.collection('proposals').document(request.conversation_id)

@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from auth_middleware import firebase_auth
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -235,7 +236,7 @@ async def get_conversation_history(ctx: RunContext[SocialDependencies]) -> List[
 
 # ========== API Endpoints ==========
 @app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
     """Main chat endpoint for social media generation"""
     try:
         # logging.info(f"Received chat request from user: {request.user_display_name}")
