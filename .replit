@@ -1,0 +1,11 @@
+modules = ["python-3.11"]
+[workflows]
+runButton = "Run Server"
+
+[[workflows.workflow]]
+name = "Run Server"
+author = 33121233
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
