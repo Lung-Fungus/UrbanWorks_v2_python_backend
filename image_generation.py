@@ -1,15 +1,14 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 import replicate
-import os
 import anthropic
 from typing import Optional
 import firebase_admin
-from firebase_admin import credentials, storage
+from firebase_admin import storage
 from datetime import datetime
 import httpx
 import json
-from config import get_api_keys, get_firebase_credentials, initialize_environment, get_firebase_config
+from config import get_api_keys, initialize_environment, get_firebase_config
 
 # Initialize environment
 initialize_environment()

@@ -4,8 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, TypedDict, Annotated, Any
 from datetime import datetime
 import firebase_admin
-from firebase_admin import credentials, firestore
-import os
+from firebase_admin import firestore
 import logging
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 import anthropic
@@ -14,12 +13,11 @@ from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.outputs import ChatGeneration, ChatResult
 from tavily import TavilyClient
 import re
-import uuid
 from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import ToolNode
 from langchain.tools import Tool
 from fastapi.responses import Response
-from config import get_api_keys, get_firebase_credentials, initialize_environment
+from config import get_api_keys, initialize_environment
 import json
 
 # Initialize environment

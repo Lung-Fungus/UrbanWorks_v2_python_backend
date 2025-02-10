@@ -1,10 +1,10 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
-from firebase_admin import credentials, storage
+from firebase_admin import storage
 import os
 from datetime import datetime
-from config import get_firebase_credentials, initialize_environment, get_firebase_config
+from config import initialize_environment, get_firebase_config
 
 # Initialize environment
 initialize_environment()
