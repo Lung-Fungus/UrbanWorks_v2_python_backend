@@ -23,11 +23,12 @@ app.add_middleware(
 # Initialize Firebase Admin
 try:
     if not firebase_admin._apps:
-        from config import initialize_firebase
+        from config import initialize_firebase, get_firebase_config
         initialize_firebase()
     
-    # Get default bucket
-    bucket = storage.bucket()
+    # Get bucket with explicit name
+    firebase_config = get_firebase_config()
+    bucket = storage.bucket(firebase_config["storageBucket"])
     print(f"Firebase initialized successfully with bucket: {bucket.name}")
     
     # Test bucket existence and create if needed
