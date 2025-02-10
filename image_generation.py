@@ -33,7 +33,7 @@ if not firebase_admin._apps:
         'storageBucket': firebase_config["storageBucket"]
     })
 
-bucket = storage.bucket()  # Use default bucket from initialization
+bucket = storage.bucket(firebase_config["storageBucket"])  # Explicitly specify bucket name
 print(f"Firebase initialized successfully with bucket: {bucket.name}")
 
 # Test bucket existence
