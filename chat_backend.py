@@ -84,15 +84,15 @@ class CustomChatAnthropic(BaseChatModel):
             f"{i+1}. {tool.name}: {tool.description}" 
             for i, tool in enumerate(tools)
         )
-        
+
         def _new_system_message(system: str) -> str:
             return f"{system}\n\nYou have access to the following tools:\n{tools_str}\n\nTo use a tool, output a message in this format:\n<tool_calls>\n<tool>tool_name</tool>\n<input>tool input</input>\n</tool_calls>"
-        
+
         def _new_generate(*args, **kwargs):
             if "system" in kwargs:
                 kwargs["system"] = _new_system_message(kwargs["system"])
             return self._generate(*args, **kwargs)
-        
+
         new_model = CustomChatAnthropic(
             client=self.client,
             model_name=self.model_name,
@@ -215,7 +215,7 @@ CRITICAL FORMATTING RULES:
    <analysis>
    [analysis content]
    </analysis>
-   
+
    <response>
    [response content]
    </response>
@@ -238,29 +238,29 @@ def perform_web_search(query: str) -> str:
             include_answer=True,
             max_results=10
         )
-        
+
         logger.info(f"Search successful:")
         logger.info(f"- Number of results: {len(search_results.get('results', []))}")
         logger.info(f"- Has summary: {'Yes' if search_results.get('answer') else 'No'}")
-        
+
         if search_results.get("answer"):
             logger.info(f"Search summary: {search_results['answer'][:200]}...")
-        
+
         formatted_results = "Search Results:\n\n"
         if search_results.get("answer"):
             formatted_results += f"Summary: {search_results['answer']}\n\n"
-        
+
         formatted_results += "Sources:\n"
         for idx, result in enumerate(search_results.get("results", [])):
             logger.info(f"\nProcessing result {idx + 1}:")
             logger.info(f"- Title: {result['title']}")
             logger.info(f"- URL: {result['url']}")
             logger.info(f"- Content length: {len(result['content'])} characters")
-            
+
             formatted_results += f"- {result['title']}\n"
             formatted_results += f"  URL: {result['url']}\n"
             formatted_results += f"  Content: {result['content']}\n\n"
-        
+
         logger.info("\n=== WEB SEARCH COMPLETED ===")
         logger.info(f"Total formatted results length: {len(formatted_results)} characters")
         return formatted_results
@@ -323,7 +323,9 @@ def create_agent_node():
 
 {f'<tool_response>\n{tool_response}\n</tool_response>' if tool_response else ''}
 
-{f'<files>{files}</files>' if files else ''}"""
+<files>
+{files if files else '[]'}
+</files>"""
 
             # Get response from Clarke with context using llm_with_tools
             response = llm_with_tools.invoke([HumanMessage(content=context)], system=CLARKE_SYSTEM_MESSAGE)
@@ -354,7 +356,7 @@ def create_agent_node():
             # Parse the analysis section
             analysis_match = re.search(r'<analysis>([\s\S]*?)</analysis>', content)
             analysis = analysis_match.group(1).strip() if analysis_match else ""
-            
+
             response_match = re.search(r'<response>([\s\S]*)', content)
             if response_match:
                 main_response = response_match.group(1).strip()
@@ -401,11 +403,11 @@ def should_continue(state: State) -> str:
 
 def create_chat_graph():
     workflow = StateGraph(State)
-    
+
     # Add nodes
     workflow.add_node("agent", create_agent_node())
     workflow.add_node("tools", tool_node)
-    
+
     # Add edges
     workflow.add_edge(START, "agent")
     workflow.add_conditional_edges(
@@ -417,7 +419,7 @@ def create_chat_graph():
         }
     )
     workflow.add_edge("tools", "agent")
-    
+
     workflow.set_entry_point("agent")
     return workflow.compile()
 
@@ -451,7 +453,7 @@ async def chat(request: ChatRequest):
         conversation_ref = db.collection('conversations').document(request.conversation_id)
         messages_ref = conversation_ref.collection('messages')
         messages_query = messages_ref.order_by('timestamp').stream()
-        
+
         # Convert Firestore messages to LangChain messages
         messages = []
         for msg in messages_query:
@@ -460,10 +462,10 @@ async def chat(request: ChatRequest):
                 messages.append(HumanMessage(content=msg_data['content']))
             else:
                 messages.append(AIMessage(content=msg_data['content']))
-        
+
         # Add the new user message
         messages.append(HumanMessage(content=request.message))
-        
+
         # Initialize state
         initial_state = {
             "messages": messages,
@@ -475,39 +477,39 @@ async def chat(request: ChatRequest):
             "tool_input": None,
             "tool_name": None
         }
-        
+
         # Create and run the graph
         graph = create_chat_graph()
         final_state = graph.invoke(initial_state)
-        
+
         # Get the response
         response = final_state["response"]
         if not response:
             raise ValueError("No response generated")
-            
+
         # Save to Firestore
         messages_ref.add({
             "role": "user",
             "content": request.message,
             "timestamp": datetime.now()
         })
-        
+
         messages_ref.add({
             "role": "assistant",
             "content": response["content"],
             "analysis": response["analysis"],
             "timestamp": datetime.now()
         })
-        
+
         conversation_ref.update({
             "lastMessageTimestamp": datetime.now(),
             "messageCount": firestore.Increment(2)
         })
-        
+
         logger.info("=== CHAT REQUEST COMPLETED ===")
         logger.info(f"Final response content:\n{response['content']}")
         logger.info(f"Final analysis content:\n{response['analysis']}")
-        
+
         return {
             "message": {
                 "role": "assistant",
@@ -515,7 +517,7 @@ async def chat(request: ChatRequest):
             },
             "analysis": response["analysis"]
         }
-        
+
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
