@@ -1,0 +1,104 @@
+2025-02-10 16:46:34.55
+d2e579e2
+User
+2025-02-10 21:46:34,555 - chat_backend - INFO - Logging configured with console output
+2025-02-10 16:46:39.32
+d2e579e2
+User
+INFO: Started server process [20]
+2025-02-10 16:46:39.32
+d2e579e2
+User
+INFO: Waiting for application startup.
+2025-02-10 16:46:39.32
+d2e579e2
+User
+INFO: Application startup complete.
+2025-02-10 16:46:39.33
+d2e579e2
+User
+INFO: Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Running on Replit - using secrets for configuration
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Environment initialized successfully
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Running on Replit - using secrets for configuration
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Environment initialized successfully
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Running on Replit - using secrets for configuration
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Environment initialized successfully
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Running on Replit - using secrets for configuration
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Environment initialized successfully
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Firebase initialized successfully with bucket: urbanworks-v2.firebasestorage.app
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Bucket exists and is accessible
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Running on Replit - using secrets for configuration
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Environment initialized successfully
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Firebase initialized successfully with bucket: urbanworks-v2.firebasestorage.app
+2025-02-10 16:46:40.22
+d2e579e2
+User
+Bucket exists and is accessible
+2025-02-10 16:46:40.22
+d2e579e2
+User
+INFO: 127.0.0.1:59378 - "GET / HTTP/1.1" 200 OK
+2025-02-10 16:47:36.75
+d2e579e2
+User
+INFO: 35.191.84.248:0 - "OPTIONS /image/generate HTTP/1.1" 200 OK
+2025-02-10 16:47:46.40
+d2e579e2
+User
+2025-02-10 21:47:46,408 - httpx - INFO - HTTP Request: POST https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro-ultra/predictions "HTTP/1.1 201 Created"
+2025-02-10 16:47:46.68
+d2e579e2
+User
+Starting image generation with prompt: A curious tabby cat perched on a vibrant red cushion, wearing a whimsical oversized top hat adorned with colorful feathers. The cat delicately balances a piece of nigiri sushi between its paws, eyes gleaming with mischief. Soft, warm lighting casts a cozy glow on the scene, highlighting the cat's whiskers and the glistening fish atop the sushi. The background features a blurred traditional Japanese restaurant interior, with paper lanterns and bamboo accents. Photorealistic style with a touch of playful charm.
+2025-02-10 16:47:46.68
+d2e579e2
+User
+Generation parameters: {'prompt': "A curious tabby cat perched on a vibrant red cushion, wearing a whimsical oversized top hat adorned with colorful feathers. The cat delicately balances a piece of nigiri sushi between its paws, eyes gleaming with mischief. Soft, warm lighting casts a cozy glow on the scene, highlighting the cat's whiskers and the glistening fish atop the sushi. The background features a blurred traditional Japanese restaurant interior, with paper lanterns and bamboo accents. Photorealistic style with a touch of playful charm.", 'aspect_ratio': '1:1', 'raw': True, 'safety_tolerance': 6, 'output_format': 'jpg'}
+2025-02-10 16:47:46.68
+d2e579e2
+User
+Starting Replicate API call...
+2025-02-10 16:47:46.68
+d2e579e2
+User
+Generated image URL from Replicate: https://replicate.delivery/xezq/zs1W8SABUpZ9BFFCQualExzSYEZav7f2Y8KCJhVe9DECYCOUA/tmp_ydbx8wu.jpg
