@@ -13,3 +13,8 @@ args = "python main.py"
 [[ports]]
 localPort = 8080
 externalPort = 80
+
+[deployment]
+build = ["sh", "-c", "pip install -r requirements.txt"]
+run = ["sh", "-c", "python main.py"]
+deploymentTarget = "gce"
