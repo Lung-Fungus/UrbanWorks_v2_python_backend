@@ -9,6 +9,8 @@ from datetime import datetime
 import httpx
 import json
 from config import get_api_keys, initialize_environment, get_firebase_config
+from auth_middleware import firebase_auth
+from fastapi import Depends
 import os
 
 # Initialize environment
@@ -79,7 +81,7 @@ async def improve_prompt_endpoint(prompt: str = Form(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate")
-async def generate_image(
+async def generate_image(user_data: dict = Depends(firebase_auth),
     prompt: str = Form(...),
     aspect_ratio: str = Form("1:1"),
     raw: bool = Form(False),
