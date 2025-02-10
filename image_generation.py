@@ -194,17 +194,21 @@ async def generate_image(user_data: dict = Depends(firebase_auth),
                     print(f"Prompt: {prompt}")
                     print(f"Parameters: {data['parameters']}")
 
-                    # Make the request with both files and form data
+                    # Make the request with both files and form data, following redirects
                     upload_response = await client.post(
                         f'{API_BASE_URL}/upload',
                         files=files,
-                        data=data
+                        data=data,
+                        follow_redirects=True
                     )
 
                     print(f"Upload response status: {upload_response.status_code}")
 
                     if upload_response.status_code != 200:
                         error_text = await upload_response.aread()
+                        print(f"Upload failed with status {upload_response.status_code}")
+                        print(f"Response headers: {upload_response.headers}")
+                        print(f"Response body: {error_text}")
                         raise Exception(f"Failed to upload generated image. Status: {upload_response.status_code}, Response: {error_text}")
 
                     response_text = await upload_response.aread()
