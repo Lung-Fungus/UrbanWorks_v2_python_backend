@@ -98,11 +98,27 @@ def initialize_environment():
 
 def initialize_firebase():
     if not firebase_admin._apps:
-        cred = credentials.Certificate(get_firebase_credentials())
-        firebase_config = get_firebase_config()
-        firebase_admin.initialize_app(cred, {
-            'storageBucket': firebase_config["storageBucket"]
-        })
+        try:
+            cred = credentials.Certificate(get_firebase_credentials())
+            firebase_config = get_firebase_config()
+            bucket_name = firebase_config.get("storageBucket")
+            
+            if not bucket_name:
+                raise ValueError("Storage bucket name not found in configuration")
+                
+            firebase_admin.initialize_app(cred, {
+                'storageBucket': bucket_name
+            })
+            
+            # Verify bucket exists
+            bucket = storage.bucket()
+            if not bucket.exists():
+                print(f"Warning: Bucket '{bucket_name}' does not exist")
+                print("Please create the bucket in the Firebase Console")
+                
+        except Exception as e:
+            print(f"Firebase initialization error: {str(e)}")
+            raise
 
 if __name__ == "__main__":
     initialize_environment() 
