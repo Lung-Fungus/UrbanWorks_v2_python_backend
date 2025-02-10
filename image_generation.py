@@ -97,7 +97,7 @@ async def generate_image(
             files = {'file': (image_prompt.filename, await image_prompt.read(), image_prompt.content_type)}
             print(f"Uploading reference image with content type: {image_prompt.content_type}")
             async with httpx.AsyncClient() as client:
-                response = await client.post('http://localhost:8001/upload', files=files)
+                response = await client.post('/upload', files=files)
                 print(f"Reference image upload response status: {response.status_code}")
                 if response.status_code == 200:
                     data = response.json()
@@ -193,7 +193,7 @@ async def generate_image(
                     
                     # Make the request with both files and form data
                     upload_response = await client.post(
-                        'http://localhost:8001/upload',
+                        '/upload',
                         files=files,
                         data=data
                     )
@@ -251,7 +251,7 @@ async def delete_image(storage_path: str):
         # Use the delete endpoint from firestore_upload
         async with httpx.AsyncClient() as client:
             # The firestore_upload endpoint expects 'path' not 'storage_path'
-            response = await client.delete(f'http://localhost:8001/delete?path={storage_path}')
+            response = await client.delete(f'/upload/delete?path={storage_path}')
             
             if response.status_code != 200:
                 response_text = await response.aread()
@@ -271,5 +271,4 @@ async def delete_image(storage_path: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    print("Please run main.py to start the server")

@@ -247,5 +247,4 @@ async def list_images():
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001) 
+    print("Please run main.py to start the server") 
