@@ -2,7 +2,7 @@ import os
 import json
 from pathlib import Path
 import firebase_admin
-from firebase_admin import credentials
+from firebase_admin import credentials, storage
 
 def is_replit():
     """Check if we're running on Replit"""
