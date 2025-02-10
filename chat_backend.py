@@ -1,5 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
-from auth_middleware import firebase_auth
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, TypedDict, Annotated, Any
@@ -20,6 +19,7 @@ from langchain.tools import Tool
 from fastapi.responses import Response
 from config import get_api_keys, initialize_environment
 import json
+import uuid
 
 # Initialize environment
 initialize_environment()
@@ -331,10 +331,23 @@ def create_agent_node():
             response = llm_with_tools.invoke([HumanMessage(content=context)], system=CLARKE_SYSTEM_MESSAGE, tool_response=tool_response)
             content = response.content.strip()
 
-            # Check for tool calls in the response
+            # Extract tool calls from the content
+            tool_calls_match = re.search(r'<tool_calls>([\s\S]*?)</tool_calls>', content)
             extracted_tool_calls = []
-            for tool_call in response.tool_calls:
-                extracted_tool_calls.append(tool_call)
+            if tool_calls_match:
+                tool_calls_text = tool_calls_match.group(1).strip()
+                tool_name_match = re.search(r'<tool>(.*?)</tool>', tool_calls_text)
+                tool_input_match = re.search(r'<input>(.*?)</input>', tool_calls_text)
+
+                if tool_name_match and tool_input_match:
+                    extracted_tool = {
+                        "name": tool_name_match.group(1).strip(),
+                        "args": {"query": tool_input_match.group(1).strip()},
+                        "id": str(uuid.uuid4())
+                    }
+                    extracted_tool_calls.append(extracted_tool)
+                    # Remove the tool_calls block from the content
+                    content = re.sub(r'<tool_calls>[\s\S]*?</tool_calls>', '', content).strip()
 
             # Parse the analysis section
             analysis_match = re.search(r'<analysis>([\s\S]*?)</analysis>', content)
@@ -426,7 +439,7 @@ async def graph_visualization():
         raise HTTPException(status_code=500, detail="Error generating graph visualization")
 
 @app.post("/chat")
-async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
+async def chat(request: ChatRequest):
     try:
         # Log incoming request
         logger.info("=== NEW CHAT REQUEST ===")

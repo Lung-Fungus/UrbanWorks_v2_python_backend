@@ -1,5 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
-from auth_middleware import firebase_auth
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 import replicate
 import anthropic
@@ -10,9 +9,12 @@ from datetime import datetime
 import httpx
 import json
 from config import get_api_keys, initialize_environment, get_firebase_config
+import os
 
 # Initialize environment
 initialize_environment()
+
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://urbanworks-v2-pythonbackend.replit.app')
 
 app = FastAPI()
 
@@ -69,7 +71,7 @@ async def improve_prompt(prompt: str) -> str:
     return response.content[0].text
 
 @app.post("/improve-prompt")
-async def improve_prompt_endpoint(prompt: str = Form(...), user_data: dict = Depends(firebase_auth)):
+async def improve_prompt_endpoint(prompt: str = Form(...)):
     try:
         improved_prompt = await improve_prompt(prompt)
         return {"improved_prompt": improved_prompt}
@@ -78,7 +80,6 @@ async def improve_prompt_endpoint(prompt: str = Form(...), user_data: dict = Dep
 
 @app.post("/generate")
 async def generate_image(
-    user_data: dict = Depends(firebase_auth),
     prompt: str = Form(...),
     aspect_ratio: str = Form("1:1"),
     raw: bool = Form(False),
@@ -97,7 +98,7 @@ async def generate_image(
             files = {'file': (image_prompt.filename, await image_prompt.read(), image_prompt.content_type)}
             print(f"Uploading reference image with content type: {image_prompt.content_type}")
             async with httpx.AsyncClient() as client:
-                response = await client.post('/upload', files=files)
+                response = await client.post(f'{API_BASE_URL}/upload', files=files)
                 print(f"Reference image upload response status: {response.status_code}")
                 if response.status_code == 200:
                     data = response.json()
@@ -268,6 +269,37 @@ async def delete_image(storage_path: str):
         raise he
     except Exception as e:
         print(f"Error deleting image: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/list-images")
+async def list_images(userId: str):
+    try:
+        print(f"Listing images for user: {userId}")
+        # List all files in the user's images directory
+        blobs = bucket.list_blobs(prefix=f"images/{userId}/")
+
+        images = []
+        for blob in blobs:
+            # Get the metadata
+            blob.reload()  # Ensure we have the latest metadata
+            metadata = blob.metadata or {}
+
+            # Create image data structure
+            image_data = {
+                "storage_path": blob.name,
+                "url": blob.public_url,
+                "prompt": metadata.get("prompt", ""),
+                "created": metadata.get("created", ""),
+                "parameters": metadata.get("parameters", "{}"),
+            }
+            images.append(image_data)
+
+        # Sort by creation time, newest first
+        images.sort(key=lambda x: x["created"], reverse=True)
+        return {"images": images}
+
+    except Exception as e:
+        print(f"Error listing images: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
