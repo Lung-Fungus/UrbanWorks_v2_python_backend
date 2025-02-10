@@ -99,7 +99,10 @@ def initialize_environment():
 def initialize_firebase():
     if not firebase_admin._apps:
         cred = credentials.Certificate(get_firebase_credentials())
-        firebase_admin.initialize_app(cred, {'storageBucket': os.environ.get("FIREBASE_STORAGE_BUCKET")})
+        firebase_config = get_firebase_config()
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': firebase_config["storageBucket"]
+        })
 
 if __name__ == "__main__":
     initialize_environment() 
