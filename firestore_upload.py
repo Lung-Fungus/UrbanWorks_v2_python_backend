@@ -25,12 +25,12 @@ try:
     if not firebase_admin._apps:
         from config import initialize_firebase, get_firebase_config
         initialize_firebase()
-    
+
     # Get bucket with explicit name
     firebase_config = get_firebase_config()
     bucket = storage.bucket(firebase_config["storageBucket"])
     print(f"Firebase initialized successfully with bucket: {bucket.name}")
-    
+
     # Test bucket existence and create if needed
     if not bucket.exists():
         print("Bucket does not exist, attempting to create...")
@@ -60,7 +60,7 @@ except Exception as e:
 async def health_check():
     return {"status": "healthy"}
 
-@app.post("/upload")
+@app.post("/")
 async def upload_file(
     file: UploadFile = File(...),
     template_name: str = Form(None),
@@ -76,7 +76,7 @@ async def upload_file(
         print(f"- Content type: {file.content_type}")
         print(f"- Prompt: {prompt}")
         print(f"- Parameters: {parameters}")
-        
+
         # Validate file type
         allowed_types = [
             'application/pdf', 
@@ -98,11 +98,11 @@ async def upload_file(
         print("Reading file content...")
         content = await file.read()
         print(f"File content read successfully, size: {len(content)} bytes")
-        
+
         # Generate unique filename while preserving original name
         base_name, file_extension = os.path.splitext(file.filename)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
+
         # Determine the storage path based on file type
         if file.content_type.startswith('image/'):
             unique_filename = f"Images/{base_name}_{timestamp}{file_extension}"
@@ -110,14 +110,14 @@ async def upload_file(
         else:
             unique_filename = f"Templates/{base_name}_{timestamp}{file_extension}"
             print(f"File identified as document, using Templates/ directory")
-            
+
         print(f"Generated unique filename: {unique_filename}")
 
         try:
             print("\n=== Starting Firebase Storage upload ===")
             bucket = storage.bucket()
             print(f"Got bucket reference: {bucket.name}")
-            
+
             # Create blob
             blob = bucket.blob(unique_filename)
             print(f"Created blob reference: {blob.name}")
@@ -126,32 +126,32 @@ async def upload_file(
             metadata = {
                 'contentType': file.content_type
             }
-            
+
             # Add prompt if provided
             if prompt:
                 print(f"Adding prompt to metadata: {prompt}")
                 metadata['prompt'] = prompt
-            
+
             # Add parameters if provided
             if parameters:
                 print(f"Adding parameters to metadata: {parameters}")
                 metadata['parameters'] = parameters
-                
+
             print(f"Setting complete metadata: {metadata}")
-            
+
             # Set metadata on blob
             blob.metadata = metadata
-            
+
             # Upload to Firebase Storage
             print("Uploading file to Firebase Storage...")
             blob.upload_from_string(
                 content,
                 content_type=file.content_type
             )
-            
+
             # Make sure metadata is saved
             blob.patch()
-            
+
             print("File uploaded successfully to Firebase Storage")
 
             # Make the blob publicly accessible
@@ -200,12 +200,12 @@ async def delete_file(path: str = Query(..., description="Storage path of the fi
     try:
         bucket = storage.bucket()  # Use default bucket
         blob = bucket.blob(path)
-        
+
         if not blob.exists():
             raise HTTPException(status_code=404, detail="File not found")
-            
+
         blob.delete()
-        
+
         return {"success": True, "message": "File deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -216,7 +216,7 @@ async def list_images():
         print("\n=== Starting image listing process ===")
         bucket = storage.bucket()
         blobs = bucket.list_blobs(prefix="Images/")
-        
+
         images = []
         for blob in blobs:
             if blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
@@ -233,7 +233,7 @@ async def list_images():
                     "prompt": metadata.get('prompt', ''),
                     "parameters": metadata.get('parameters', '')
                 })
-        
+
         print(f"Found {len(images)} images")
         return {"images": images}
     except Exception as e:

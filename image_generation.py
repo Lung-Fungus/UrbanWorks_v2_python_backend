@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 import replicate
 import anthropic
@@ -23,10 +23,16 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://urbanworks-v2.web.app",
+        "https://urbanworks-v2.firebaseapp.com",
+        "https://urbanworks-v2-pythonbackend.replit.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # Initialize Firebase Admin if not already initialized
@@ -81,7 +87,7 @@ async def improve_prompt_endpoint(prompt: str = Form(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate")
-async def generate_image(user_data: dict = Depends(firebase_auth),
+async def generate_image(request: Request, user_data: dict = Depends(firebase_auth),
     prompt: str = Form(...),
     aspect_ratio: str = Form("1:1"),
     raw: bool = Form(False),
@@ -92,15 +98,49 @@ async def generate_image(user_data: dict = Depends(firebase_auth),
 ):
     try:
         print(f"Starting image generation with prompt: {prompt}")
+        #print(f"Headers: {request.headers}")  # Log all headers
+        #print(f"User data: {user_data}")  # Log user_data for debugging
+
+        # Extract token from user_data.  Let's be VERY explicit and check multiple places.
+        token = None
+        if user_data:
+            token = user_data.get('token')
+            if not token:
+                token = user_data.get('uid')  # Sometimes Firebase uses 'uid'
+            if not token:
+                token = user_data.get('user_id')  # Another possibility
+
+        # NEW: Extract user_id separately from user_data and validate
+        user_id = user_data.get('uid') or user_data.get('user_id')
+        if not user_id:
+            raise HTTPException(status_code=401, detail="No valid user id found")
+
+        # Check Authorization header directly (for debugging)
+        auth_header = request.headers.get('Authorization')
+        if auth_header:
+            #print(f"Authorization header: {auth_header}")
+            if auth_header.startswith("Bearer "):
+                header_token = auth_header.split(" ")[1]
+                #print(f"Token from header: {header_token}")
+                if not token:
+                    token = header_token # Prioritize header token if found
+
+        if not token:
+            raise HTTPException(status_code=401, detail="No valid authentication token found")
+
         # Handle image prompt upload if provided
         image_prompt_url = None
         if image_prompt:
             print(f"Processing image prompt: {image_prompt.filename}")
-            # Upload reference image using the upload endpoint
             files = {'file': (image_prompt.filename, await image_prompt.read(), image_prompt.content_type)}
             print(f"Uploading reference image with content type: {image_prompt.content_type}")
             async with httpx.AsyncClient() as client:
-                response = await client.post(f'{API_BASE_URL}/upload', files=files)
+                response = await client.post(
+                    f'{API_BASE_URL}/upload',
+                    files=files,
+                    headers={'Authorization': f'Bearer {token}'},
+                    follow_redirects=True,
+                )
                 print(f"Reference image upload response status: {response.status_code}")
                 if response.status_code == 200:
                     data = response.json()
@@ -176,9 +216,10 @@ async def generate_image(user_data: dict = Depends(firebase_auth),
                         )
                     }
 
-                    # Add metadata fields
+                    # Add metadata fields and include userId so that the file is stored correctly.
                     data = {
                         'prompt': prompt,  # Send prompt directly
+                        'userId': user_id,  # NEW: include user id to dictate the folder path in Firebase
                         'parameters': json.dumps({
                             "prompt": prompt,
                             "aspect_ratio": aspect_ratio,
@@ -194,11 +235,6 @@ async def generate_image(user_data: dict = Depends(firebase_auth),
                     print(f"Prompt: {prompt}")
                     print(f"Parameters: {data['parameters']}")
 
-                    # Extract token from user_data properly
-                    token = user_data.get('id_token') or user_data.get('stsTokenManager', {}).get('accessToken')
-                    if not token:
-                        raise HTTPException(status_code=401, detail="No valid authentication token found")
-
                     # Make the request with both files and form data, following redirects
                     upload_response = await client.post(
                         f'{API_BASE_URL}/upload',
@@ -206,7 +242,6 @@ async def generate_image(user_data: dict = Depends(firebase_auth),
                         data=data,
                         headers={'Authorization': f'Bearer {token}'},
                         follow_redirects=True,
-                        verify=False  # Skip SSL verification for internal requests
                     )
 
                     print(f"Upload response status: {upload_response.status_code}")
