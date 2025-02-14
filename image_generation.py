@@ -323,28 +323,35 @@ async def delete_image(storage_path: str):
 async def list_images(userId: str):
     try:
         print(f"Listing images for user: {userId}")
-        # List all files in the user's images directory
-        blobs = bucket.list_blobs(prefix=f"images/{userId}/")
+        all_images = []
 
-        images = []
-        for blob in blobs:
-            # Get the metadata
-            blob.reload()  # Ensure we have the latest metadata
-            metadata = blob.metadata or {}
+        # Only list blobs in the user's specific directory
+        user_blobs = bucket.list_blobs(prefix=f"users/{userId}/images/")
 
-            # Create image data structure
-            image_data = {
-                "storage_path": blob.name,
-                "url": blob.public_url,
-                "prompt": metadata.get("prompt", ""),
-                "created": metadata.get("created", ""),
-                "parameters": metadata.get("parameters", "{}"),
-            }
-            images.append(image_data)
+        for blob in user_blobs:
+            try:
+                # Get the metadata
+                blob.reload()  # Ensure we have the latest metadata
+                metadata = blob.metadata or {}
+
+                # Create image data structure
+                image_data = {
+                    "storage_path": blob.name,
+                    "url": f"https://firebasestorage.googleapis.com/v0/b/{bucket.name}/o/{blob.name.replace('/', '%2F')}?alt=media",
+                    "prompt": metadata.get("prompt", ""),
+                    "created": metadata.get("created", datetime.datetime.now().isoformat()),
+                    "parameters": metadata.get("parameters", "{}"),
+                }
+                all_images.append(image_data)
+                print(f"Added image: {blob.name}")
+            except Exception as e:
+                print(f"Error processing blob {blob.name}: {str(e)}")
+                continue
 
         # Sort by creation time, newest first
-        images.sort(key=lambda x: x["created"], reverse=True)
-        return {"images": images}
+        all_images.sort(key=lambda x: x["created"], reverse=True)
+        print(f"Total images found: {len(all_images)}")
+        return {"images": all_images}
 
     except Exception as e:
         print(f"Error listing images: {str(e)}")
