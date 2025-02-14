@@ -460,8 +460,13 @@ def should_continue(state: State) -> str:
     """Determine if we should continue running tools or end."""
     messages = state["messages"]
     last_message = messages[-1] if messages else None
-
+    
     if not last_message:
+        return "agent"
+
+    # If we just got a tool response, go back to agent
+    if state.get("tool_response"):
+        state["tool_response"] = None  # Clear the tool response
         return "agent"
 
     # Check for tool calls in the message
