@@ -1,17 +1,19 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 import replicate
 import anthropic
 from typing import Optional
 import firebase_admin
 from firebase_admin import storage
-from datetime import datetime
+from datetime import datetime, timedelta
 import httpx
 import json
 from config import get_api_keys, initialize_environment, get_firebase_config
 from auth_middleware import firebase_auth
 from fastapi import Depends
 import os
+import base64
+import mimetypes
 
 # Initialize environment
 initialize_environment()
@@ -65,7 +67,7 @@ async def improve_prompt(prompt: str) -> str:
     Return only the improved prompt without any explanations."""
 
     response = claude_client.messages.create(
-        model="claude-3-5-sonnet-20240620",
+        model="claude-3-5-haiku-20241022",
         max_tokens=200,
         system=system_prompt,
         messages=[
@@ -94,7 +96,8 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
     seed: Optional[int] = Form(None),
     image_prompt: Optional[UploadFile] = File(None),
     image_prompt_strength: float = Form(0.1),
-    output_format: str = Form("jpg")
+    output_format: str = Form("jpg"),
+    folder: str = Form("Uncategorized")  # Add folder parameter
 ):
     try:
         print(f"Starting image generation with prompt: {prompt}")
@@ -104,6 +107,11 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
         if not user_id:
             raise HTTPException(status_code=401, detail="No valid user id found")
         print(f"Processing request for user_id: {user_id}")
+
+        # Sanitize folder name
+        folder = "".join(c for c in folder if c.isalnum() or c in (' ', '-', '_')).strip()
+        if not folder:
+            folder = "Uncategorized"
 
         # Extract token for authentication
         token = user_data.get('token') or user_data.get('uid') or user_data.get('user_id')
@@ -117,24 +125,18 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
 
         # Handle image prompt upload if provided
         image_prompt_url = None
+        image_prompt_data = None
         if image_prompt:
             print(f"Processing image prompt: {image_prompt.filename}")
-            files = {'file': (image_prompt.filename, await image_prompt.read(), image_prompt.content_type)}
-            print(f"Uploading reference image with content type: {image_prompt.content_type}")
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f'{API_BASE_URL}/upload',
-                    files=files,
-                    headers={'Authorization': f'Bearer {token}'},
-                    follow_redirects=True,
-                )
-                print(f"Reference image upload response status: {response.status_code}")
-                if response.status_code == 200:
-                    data = response.json()
-                    image_prompt_url = data['url']
-                    print(f"Reference image uploaded successfully: {image_prompt_url}")
-                else:
-                    print(f"Reference image upload failed: {await response.text()}")
+            # Read the image data directly from the uploaded file
+            image_prompt_data = await image_prompt.read()
+            print(f"Successfully read image prompt data of size: {len(image_prompt_data)} bytes")
+
+            # Convert image data to base64 data URI
+            mime_type = mimetypes.guess_type(image_prompt.filename)[0] or 'image/jpeg'
+            base64_image = base64.b64encode(image_prompt_data).decode('utf-8')
+            image_prompt_url = f"data:{mime_type};base64,{base64_image}"
+            print("Successfully converted image to base64 data URI")
 
         # Prepare generation parameters
         generation_params = {
@@ -204,13 +206,14 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
                     }
 
                     # Ensure the storage path includes the user's directory
-                    storage_path = f"users/{user_id}/images/{filename}"
+                    storage_path = f"users/{user_id}/images/{folder}/{filename}"
 
                     # Add metadata fields
                     data = {
                         'prompt': prompt,
                         'userId': user_id,
-                        'storage_path': storage_path,  # Add the storage path to ensure it's used
+                        'storage_path': storage_path,
+                        'folder': folder,  # Add folder to metadata
                         'parameters': json.dumps({
                             "prompt": prompt,
                             "aspect_ratio": aspect_ratio,
@@ -222,36 +225,40 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
                         })
                     }
 
-                    print(f"Uploading to storage path: {storage_path}")
-                    print(f"Uploading with metadata:")
-                    print(f"User ID: {user_id}")
-                    print(f"Storage path: {storage_path}")
-                    print(f"Prompt: {prompt}")
-                    print(f"Parameters: {data['parameters']}")
-
-                    # Make the request with both files and form data, following redirects
+                    # Make the request with both files and form data
                     upload_response = await client.post(
                         f'{API_BASE_URL}/upload',
                         files=files,
                         data=data,
-                        headers={'Authorization': f'Bearer {token}'},
+                        headers={
+                            'Authorization': f'Bearer {token}',
+                            'X-Skip-Redirect': 'true'  # Add header to prevent redirect
+                        },
                         follow_redirects=True,
+                        timeout=30.0  # Add timeout
                     )
 
-                    print(f"Upload response status: {upload_response.status_code}")
-
-                    if upload_response.status_code != 200:
+                    if upload_response.status_code not in [200, 201]:
                         error_text = await upload_response.aread()
                         print(f"Upload failed with status {upload_response.status_code}")
                         print(f"Response headers: {upload_response.headers}")
                         print(f"Response body: {error_text}")
-                        raise Exception(f"Failed to upload generated image. Status: {upload_response.status_code}, Response: {error_text}")
+                        raise HTTPException(
+                            status_code=upload_response.status_code,
+                            detail=f"Failed to upload generated image: {error_text.decode('utf-8')}"
+                        )
 
-                    response_text = await upload_response.aread()
-                    upload_data = json.loads(response_text.decode('utf-8'))
-                    firebase_url = upload_data['url']
-                    storage_path = upload_data['storage_path']
-                    print(f"Upload successful. Firebase URL: {firebase_url}, Storage path: {storage_path}")
+                    try:
+                        response_text = await upload_response.aread()
+                        upload_data = json.loads(response_text.decode('utf-8'))
+                        firebase_url = upload_data['url']
+                        storage_path = upload_data['storage_path']
+                    except Exception as e:
+                        print(f"Error parsing upload response: {str(e)}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Failed to parse upload response"
+                        )
 
         except Exception as e:
             print(f"Error during image generation/upload: {str(e)}")
@@ -313,42 +320,159 @@ async def delete_image(storage_path: str):
         print(f"Error deleting image: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/list-images")
-async def list_images(userId: str):
+@app.get("/get-image")
+async def get_image(storage_path: str = Query(...), user_data: dict = Depends(firebase_auth)):
     try:
-        print(f"Listing images for user: {userId}")
-        all_images = []
+        # Verify user has access to this image
+        user_id = user_data.get('uid')
+        if not user_id:
+            raise HTTPException(status_code=401, detail="No valid user id found")
 
-        # Only list blobs in the user's specific directory
-        user_blobs = bucket.list_blobs(prefix=f"users/{userId}/images/")
+        # Verify the image belongs to the user
+        if not storage_path.startswith(f"users/{user_id}/"):
+            raise HTTPException(status_code=403, detail="Access denied")
 
-        for blob in user_blobs:
-            try:
-                # Get the metadata
-                blob.reload()  # Ensure we have the latest metadata
-                metadata = blob.metadata or {}
+        # Get the blob
+        blob = bucket.blob(storage_path)
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="Image not found")
 
-                # Create image data structure
+        # Generate a signed URL that expires in 1 hour
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(hours=1),
+            method="GET"
+        )
+
+        return {
+            "url": signed_url,
+            "storage_path": storage_path,
+            "expires_in": 3600  # seconds
+        }
+    except Exception as e:
+        print(f"Error getting image URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/list-images")
+async def list_images(user_id: str = Query(..., description="User ID to list images for")):
+    try:
+        print(f"\n=== Starting image listing process for user {user_id} ===")
+        bucket = storage.bucket()
+
+        # List all images under the user's directory
+        prefix = f"users/{user_id}/images/"
+        print(f"Listing images with prefix: {prefix}")
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        print(f"Found {len(blobs)} blobs in {prefix}")
+
+        images = []
+        folders = set(["Uncategorized"])  # Track unique folders
+
+        for blob in blobs:
+            if blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                # Extract folder from path
+                path_parts = blob.name.split('/')
+                if len(path_parts) >= 5:  # users/user_id/images/folder/filename
+                    folder = path_parts[-2]
+                    folders.add(folder)
+                else:
+                    folder = "Uncategorized"
+
+                # Generate a signed URL that expires in 1 hour
+                signed_url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=timedelta(hours=1),
+                    method="GET"
+                )
+
+                # Get metadata
+                try:
+                    metadata = blob.metadata or {}
+                except Exception as e:
+                    print(f"Error getting metadata for {blob.name}: {e}")
+                    metadata = {}
+
                 image_data = {
+                    "url": signed_url,
+                    "filename": blob.name.split('/')[-1],
                     "storage_path": blob.name,
-                    "url": f"https://firebasestorage.googleapis.com/v0/b/{bucket.name}/o/{blob.name.replace('/', '%2F')}?alt=media",
-                    "prompt": metadata.get("prompt", ""),
-                    "created": metadata.get("created", datetime.datetime.now().isoformat()),
-                    "parameters": metadata.get("parameters", "{}"),
+                    "created": blob.time_created.isoformat() if blob.time_created else None,
+                    "size": blob.size,
+                    "content_type": blob.content_type,
+                    "prompt": metadata.get('prompt', ''),
+                    "parameters": metadata.get('parameters', ''),
+                    "folder": metadata.get('folder', folder)  # Use metadata folder or path-derived folder
                 }
-                all_images.append(image_data)
-                print(f"Added image: {blob.name}")
-            except Exception as e:
-                print(f"Error processing blob {blob.name}: {str(e)}")
-                continue
+                images.append(image_data)
 
-        # Sort by creation time, newest first
-        all_images.sort(key=lambda x: x["created"], reverse=True)
-        print(f"Total images found: {len(all_images)}")
-        return {"images": all_images}
+        print(f"Found {len(images)} images in {len(folders)} folders")
+        return {
+            "images": images,
+            "folders": list(folders)
+        }
+    except Exception as e:
+        print(f"\n=== Error listing images ===")
+        print(f"Error type: {type(e)}")
+        print(f"Error message: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/move-image")
+async def move_image(
+    storage_path: str = Form(...),
+    new_folder: str = Form(...),
+    user_data: dict = Depends(firebase_auth)
+):
+    try:
+        # Verify user has access to this image
+        user_id = user_data.get('uid')
+        if not user_id:
+            raise HTTPException(status_code=401, detail="No valid user id found")
+
+        # Verify the image belongs to the user
+        if not storage_path.startswith(f"users/{user_id}/"):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Sanitize folder name
+        new_folder = "".join(c for c in new_folder if c.isalnum() or c in (' ', '-', '_')).strip()
+        if not new_folder:
+            new_folder = "Uncategorized"
+
+        # Get the source blob
+        source_blob = bucket.blob(storage_path)
+        if not source_blob.exists():
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        # Create new storage path
+        filename = storage_path.split('/')[-1]
+        new_storage_path = f"users/{user_id}/images/{new_folder}/{filename}"
+
+        # Copy to new location
+        new_blob = bucket.copy_blob(source_blob, bucket, new_storage_path)
+
+        # Update metadata
+        metadata = source_blob.metadata or {}
+        metadata['folder'] = new_folder
+        new_blob.metadata = metadata
+        new_blob.patch()
+
+        # Delete old blob
+        source_blob.delete()
+
+        # Generate new signed URL
+        signed_url = new_blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(hours=1),
+            method="GET"
+        )
+
+        return {
+            "success": True,
+            "new_storage_path": new_storage_path,
+            "url": signed_url
+        }
 
     except Exception as e:
-        print(f"Error listing images: {str(e)}")
+        print(f"Error moving image: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

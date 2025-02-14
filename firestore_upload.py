@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
 from firebase_admin import storage
@@ -14,7 +14,12 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_origins=[
+        "http://localhost:3000",
+        "https://urbanworks-v2.web.app",
+        "https://urbanworks-v2.firebaseapp.com",
+        "https://urbanworks-v2-pythonbackend.replit.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,9 +45,14 @@ try:
             # Set bucket CORS configuration
             bucket.cors = [
                 {
-                    'origin': ['http://localhost:3000'],
+                    'origin': [
+                        'http://localhost:3000',
+                        'https://urbanworks-v2.web.app',
+                        'https://urbanworks-v2.firebaseapp.com',
+                        'https://urbanworks-v2-pythonbackend.replit.app'
+                    ],
                     'method': ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-                    'responseHeader': ['Content-Type'],
+                    'responseHeader': ['Content-Type', 'Authorization'],
                     'maxAgeSeconds': 3600
                 }
             ]
@@ -62,6 +72,7 @@ async def health_check():
 
 @app.post("/")
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     template_name: str = Form(None),
     category: str = Form(None),
@@ -71,14 +82,15 @@ async def upload_file(
     storage_path: str = Form(None)
 ):
     try:
-        print(f"\n=== Starting upload process ===")
-        print(f"File details:")
-        print(f"- Filename: {file.filename}")
-        print(f"- Content type: {file.content_type}")
-        print(f"- User ID: {user_id}")
-        print(f"- Storage path: {storage_path}")
-        print(f"- Prompt: {prompt}")
-        print(f"- Parameters: {parameters}")
+        # Only log details if not a redirect (prevents duplicate logging)
+        skip_redirect = request.headers.get('X-Skip-Redirect') == 'true'
+        if not skip_redirect:
+            print(f"\n=== Starting upload process ===")
+            print(f"File details:")
+            print(f"- Filename: {file.filename}")
+            print(f"- Content type: {file.content_type}")
+            print(f"- User ID: {user_id}")
+            print(f"- Storage path: {storage_path}")
 
         # Validate file type
         allowed_types = [
@@ -91,16 +103,11 @@ async def upload_file(
             'image/gif',
             'image/webp'
         ]
-        print(f"Validating file type: {file.content_type}")
         if file.content_type not in allowed_types:
-            print(f"File type validation failed: {file.content_type} not in allowed types")
             raise HTTPException(status_code=400, detail=f"File type {file.content_type} not allowed")
-        print("File type validation passed")
 
         # Read file content
-        print("Reading file content...")
         content = await file.read()
-        print(f"File content read successfully, size: {len(content)} bytes")
 
         # Generate unique filename while preserving original name
         base_name, file_extension = os.path.splitext(file.filename)
@@ -114,22 +121,14 @@ async def upload_file(
                 else:
                     storage_path = f"users/{user_id}/templates/{base_name}_{timestamp}{file_extension}"
             else:
-                # Fallback to old behavior if no user_id
                 if file.content_type.startswith('image/'):
                     storage_path = f"Images/{base_name}_{timestamp}{file_extension}"
                 else:
                     storage_path = f"Templates/{base_name}_{timestamp}{file_extension}"
 
-        print(f"Using storage path: {storage_path}")
-
         try:
-            print("\n=== Starting Firebase Storage upload ===")
             bucket = storage.bucket()
-            print(f"Got bucket reference: {bucket.name}")
-
-            # Create blob with the storage path
             blob = bucket.blob(storage_path)
-            print(f"Created blob reference: {blob.name}")
 
             # Set metadata
             metadata = {
@@ -141,20 +140,15 @@ async def upload_file(
                 metadata['userId'] = user_id
 
             if prompt:
-                print(f"Adding prompt to metadata: {prompt}")
                 metadata['prompt'] = prompt
 
             if parameters:
-                print(f"Adding parameters to metadata: {parameters}")
                 metadata['parameters'] = parameters
-
-            print(f"Setting complete metadata: {metadata}")
 
             # Set metadata on blob
             blob.metadata = metadata
 
             # Upload to Firebase Storage
-            print("Uploading file to Firebase Storage...")
             blob.upload_from_string(
                 content,
                 content_type=file.content_type
@@ -163,11 +157,8 @@ async def upload_file(
             # Make sure metadata is saved
             blob.patch()
 
-            print("File uploaded successfully to Firebase Storage")
-
             # Generate the direct Firebase Storage URL
             storage_url = f"https://firebasestorage.googleapis.com/v0/b/{bucket.name}/o/{storage_path.replace('/', '%2F')}?alt=media"
-            print("Generated Firebase Storage URL")
 
             # Return the complete response with metadata
             response_data = {
@@ -179,16 +170,16 @@ async def upload_file(
                 "prompt": prompt,
                 "parameters": parameters
             }
-            print("\n=== Upload process completed successfully ===")
-            print(f"Response data: {response_data}")
+
+            if not skip_redirect:
+                print("\n=== Upload process completed successfully ===")
+
             return response_data
 
         except Exception as storage_error:
             print(f"\n=== Storage error occurred ===")
             print(f"Error type: {type(storage_error)}")
             print(f"Error message: {str(storage_error)}")
-            if hasattr(storage_error, '__dict__'):
-                print(f"Error details: {storage_error.__dict__}")
             raise HTTPException(status_code=500, detail=f"Storage error: {str(storage_error)}")
 
     except HTTPException as he:
@@ -197,8 +188,6 @@ async def upload_file(
         print(f"\n=== Unexpected error occurred ===")
         print(f"Error type: {type(e)}")
         print(f"Error message: {str(e)}")
-        if hasattr(e, '__dict__'):
-            print(f"Error details: {e.__dict__}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @app.delete("/delete")
@@ -225,17 +214,25 @@ async def list_images(user_id: str = Query(..., description="User ID to list ima
         # List blobs in the user's specific images directory
         prefix = f"users/{user_id}/images/"
         print(f"Listing images with prefix: {prefix}")
-        blobs = bucket.list_blobs(prefix=prefix)
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        print(f"Found {len(blobs)} blobs in {prefix}")
 
         images = []
         for blob in blobs:
+            print(f"Processing blob: {blob.name}")
             if blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
                 # Generate the direct Firebase Storage URL
                 storage_url = f"https://firebasestorage.googleapis.com/v0/b/{bucket.name}/o/{blob.name.replace('/', '%2F')}?alt=media"
 
                 # Get metadata
-                metadata = blob.metadata or {}
-                images.append({
+                try:
+                    metadata = blob.metadata or {}
+                    print(f"Blob metadata: {metadata}")
+                except Exception as e:
+                    print(f"Error getting metadata for {blob.name}: {e}")
+                    metadata = {}
+
+                image_data = {
                     "url": storage_url,
                     "filename": blob.name.split('/')[-1],
                     "storage_path": blob.name,
@@ -244,7 +241,9 @@ async def list_images(user_id: str = Query(..., description="User ID to list ima
                     "content_type": blob.content_type,
                     "prompt": metadata.get('prompt', ''),
                     "parameters": metadata.get('parameters', '')
-                })
+                }
+                print(f"Added image: {image_data['storage_path']}")
+                images.append(image_data)
 
         print(f"Found {len(images)} images for user {user_id}")
         return {"images": images}
