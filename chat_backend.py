@@ -289,7 +289,7 @@ def extract_url_content(url: str) -> str:
     try:
         extract_url = "https://api.tavily.com/extract"
         payload = {
-            "urls": url,
+            "url": url,  # Changed from "urls" to "url"
             "include_images": False,
             "extract_depth": "basic"
         }
@@ -303,39 +303,29 @@ def extract_url_content(url: str) -> str:
 
         response = requests.post(extract_url, json=payload, headers=headers)
         logger.info(f"Response status code: {response.status_code}")
-        logger.info(f"Response headers: {dict(response.headers)}")
 
         response.raise_for_status()
         content = response.json()
         logger.info("Successfully parsed JSON response")
-        logger.info(f"Content keys: {content.keys()}")
 
         # Format the extracted content
-        formatted_content = "URL Content Extraction:\n\n"
-        formatted_content += f"Source URL: {url}\n\n"
-        formatted_content += "Extracted Content:\n"
+        formatted_content = ""
 
-        if 'results' in content and content['results']:
-            for result in content['results']:
-                if 'text' in result:
-                    formatted_content += result['text'] + "\n\n"
-                elif 'content' in result:
-                    formatted_content += result['content'] + "\n\n"
+        if 'text' in content:
+            formatted_content = content['text']
+        elif 'content' in content:
+            formatted_content = content['content']
         else:
-            formatted_content += "No content could be extracted from the URL"
-
-        if 'failed_results' in content and content['failed_results']:
-            formatted_content += "\nExtraction Warnings:\n"
-            for failed in content['failed_results']:
-                formatted_content += f"- {failed.get('error', 'Unknown error')}\n"
+            formatted_content = "No content could be extracted from the URL"
 
         logger.info("\n=== URL EXTRACTION COMPLETED ===")
         logger.info(f"Total formatted content length: {len(formatted_content)} characters")
         return formatted_content
 
     except Exception as e:
-        logger.error(f"Error extracting URL content: {str(e)}", exc_info=True)
-        return f"Error extracting URL content: {str(e)}"
+        error_msg = f"Error extracting URL content: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
 
 # Define tools first
 tools = [
@@ -460,7 +450,7 @@ def should_continue(state: State) -> str:
     """Determine if we should continue running tools or end."""
     messages = state["messages"]
     last_message = messages[-1] if messages else None
-    
+
     if not last_message:
         return "agent"
 
