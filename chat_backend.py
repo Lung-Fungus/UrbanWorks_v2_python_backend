@@ -20,6 +20,7 @@ from fastapi.responses import Response
 from config import get_api_keys, initialize_environment
 import json
 import uuid
+import requests
 
 # Initialize environment
 initialize_environment()
@@ -268,12 +269,62 @@ def perform_web_search(query: str) -> str:
         logger.error(f"Error performing web search: {str(e)}", exc_info=True)
         return f"Error performing web search: {str(e)}"
 
+def extract_url_content(url: str) -> str:
+    """
+    Extract content from a given URL using Tavily's extraction API.
+
+    Args:
+        url (str): The URL to extract content from
+
+    Returns:
+        str: Formatted content from the URL
+    """
+    logger.info(f"\n=== URL CONTENT EXTRACTION TOOL EXECUTION ===")
+    logger.info(f"URL: {url}")
+
+    try:
+        extract_url = "https://api.tavily.com/extract"
+        payload = {
+            "urls": url,
+            "include_images": False,
+            "extract_depth": "basic"
+        }
+        headers = {
+            "Authorization": f"Bearer {TAVILY_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        logger.info("Making API call to Tavily extraction endpoint...")
+        response = requests.post(extract_url, json=payload, headers=headers)
+        response.raise_for_status()
+
+        content = response.json()
+
+        # Format the extracted content
+        formatted_content = "URL Content Extraction:\n\n"
+        formatted_content += f"Source URL: {url}\n\n"
+        formatted_content += "Extracted Content:\n"
+        formatted_content += content.get('content', 'No content extracted')
+
+        logger.info("\n=== URL EXTRACTION COMPLETED ===")
+        logger.info(f"Total formatted content length: {len(formatted_content)} characters")
+        return formatted_content
+
+    except Exception as e:
+        logger.error(f"Error extracting URL content: {str(e)}", exc_info=True)
+        return f"Error extracting URL content: {str(e)}"
+
 # Define tools first
 tools = [
     Tool(
         name="web_search",
         description="Search the web for current information. Use this for any queries about regulations, codes, or up-to-date information. Input should be your search query.",
         func=perform_web_search,
+    ),
+    Tool(
+        name="extract_url",
+        description="Extract and analyze content from a specific URL. Input should be the complete URL including http:// or https://",
+        func=extract_url_content,
     )
 ]
 
