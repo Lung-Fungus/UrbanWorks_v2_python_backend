@@ -289,7 +289,7 @@ def extract_url_content(url: str) -> str:
     try:
         extract_url = "https://api.tavily.com/extract"
         payload = {
-            "url": url,  # Changed from "urls" to "url"
+            "url": url,
             "include_images": False,
             "extract_depth": "basic"
         }
