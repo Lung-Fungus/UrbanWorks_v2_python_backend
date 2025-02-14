@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
 from firebase_admin import storage
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import initialize_environment, get_firebase_config
 
 # Initialize environment
@@ -67,13 +67,16 @@ async def upload_file(
     category: str = Form(None),
     user_id: str = Form(None),
     prompt: str = Form(None),
-    parameters: str = Form(None)
+    parameters: str = Form(None),
+    storage_path: str = Form(None)
 ):
     try:
         print(f"\n=== Starting upload process ===")
         print(f"File details:")
         print(f"- Filename: {file.filename}")
         print(f"- Content type: {file.content_type}")
+        print(f"- User ID: {user_id}")
+        print(f"- Storage path: {storage_path}")
         print(f"- Prompt: {prompt}")
         print(f"- Parameters: {parameters}")
 
@@ -103,36 +106,44 @@ async def upload_file(
         base_name, file_extension = os.path.splitext(file.filename)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-        # Determine the storage path based on file type
-        if file.content_type.startswith('image/'):
-            unique_filename = f"Images/{base_name}_{timestamp}{file_extension}"
-            print(f"File identified as image, using Images/ directory")
-        else:
-            unique_filename = f"Templates/{base_name}_{timestamp}{file_extension}"
-            print(f"File identified as document, using Templates/ directory")
+        # Use provided storage path or generate one based on user_id
+        if not storage_path:
+            if user_id:
+                if file.content_type.startswith('image/'):
+                    storage_path = f"users/{user_id}/images/{base_name}_{timestamp}{file_extension}"
+                else:
+                    storage_path = f"users/{user_id}/templates/{base_name}_{timestamp}{file_extension}"
+            else:
+                # Fallback to old behavior if no user_id
+                if file.content_type.startswith('image/'):
+                    storage_path = f"Images/{base_name}_{timestamp}{file_extension}"
+                else:
+                    storage_path = f"Templates/{base_name}_{timestamp}{file_extension}"
 
-        print(f"Generated unique filename: {unique_filename}")
+        print(f"Using storage path: {storage_path}")
 
         try:
             print("\n=== Starting Firebase Storage upload ===")
             bucket = storage.bucket()
             print(f"Got bucket reference: {bucket.name}")
 
-            # Create blob
-            blob = bucket.blob(unique_filename)
+            # Create blob with the storage path
+            blob = bucket.blob(storage_path)
             print(f"Created blob reference: {blob.name}")
 
             # Set metadata
             metadata = {
-                'contentType': file.content_type
+                'contentType': file.content_type,
+                'created': datetime.now().isoformat()
             }
 
-            # Add prompt if provided
+            if user_id:
+                metadata['userId'] = user_id
+
             if prompt:
                 print(f"Adding prompt to metadata: {prompt}")
                 metadata['prompt'] = prompt
 
-            # Add parameters if provided
             if parameters:
                 print(f"Adding parameters to metadata: {parameters}")
                 metadata['parameters'] = parameters
@@ -154,22 +165,17 @@ async def upload_file(
 
             print("File uploaded successfully to Firebase Storage")
 
-            # Make the blob publicly accessible
-            print("Making blob publicly accessible...")
-            blob.make_public()
-            print("Blob made public successfully")
-
-            # Get the public URL
-            public_url = blob.public_url
-            print(f"Generated public URL: {public_url}")
+            # Generate the direct Firebase Storage URL
+            storage_url = f"https://firebasestorage.googleapis.com/v0/b/{bucket.name}/o/{storage_path.replace('/', '%2F')}?alt=media"
+            print("Generated Firebase Storage URL")
 
             # Return the complete response with metadata
             response_data = {
                 "success": True,
-                "url": public_url,
+                "url": storage_url,
                 "filename": file.filename,
                 "content_type": file.content_type,
-                "storage_path": unique_filename,
+                "storage_path": storage_path,
                 "prompt": prompt,
                 "parameters": parameters
             }
@@ -211,20 +217,26 @@ async def delete_file(path: str = Query(..., description="Storage path of the fi
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/list-images")
-async def list_images():
+async def list_images(user_id: str = Query(..., description="User ID to list images for")):
     try:
-        print("\n=== Starting image listing process ===")
+        print(f"\n=== Starting image listing process for user {user_id} ===")
         bucket = storage.bucket()
-        blobs = bucket.list_blobs(prefix="Images/")
+
+        # List blobs in the user's specific images directory
+        prefix = f"users/{user_id}/images/"
+        print(f"Listing images with prefix: {prefix}")
+        blobs = bucket.list_blobs(prefix=prefix)
 
         images = []
         for blob in blobs:
             if blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
-                blob.make_public()  # Ensure the image is publicly accessible
+                # Generate the direct Firebase Storage URL
+                storage_url = f"https://firebasestorage.googleapis.com/v0/b/{bucket.name}/o/{blob.name.replace('/', '%2F')}?alt=media"
+
                 # Get metadata
                 metadata = blob.metadata or {}
                 images.append({
-                    "url": blob.public_url,
+                    "url": storage_url,
                     "filename": blob.name.split('/')[-1],
                     "storage_path": blob.name,
                     "created": blob.time_created.isoformat() if blob.time_created else None,
@@ -234,12 +246,38 @@ async def list_images():
                     "parameters": metadata.get('parameters', '')
                 })
 
-        print(f"Found {len(images)} images")
+        print(f"Found {len(images)} images for user {user_id}")
         return {"images": images}
     except Exception as e:
         print(f"\n=== Error listing images ===")
         print(f"Error type: {type(e)}")
         print(f"Error message: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/refresh-url")
+async def refresh_image_url(storage_path: str = Query(..., description="Storage path of the image to refresh")):
+    try:
+        print(f"\n=== Refreshing signed URL for image: {storage_path} ===")
+        bucket = storage.bucket()
+        blob = bucket.blob(storage_path)
+
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        # Generate a new signed URL that expires in 1 hour
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(hours=1),
+            method="GET"
+        )
+
+        return {
+            "url": signed_url,
+            "storage_path": storage_path,
+            "expires_in": 3600  # seconds
+        }
+    except Exception as e:
+        print(f"Error refreshing signed URL: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

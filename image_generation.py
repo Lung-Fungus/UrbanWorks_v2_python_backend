@@ -98,32 +98,19 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
 ):
     try:
         print(f"Starting image generation with prompt: {prompt}")
-        #print(f"Headers: {request.headers}")  # Log all headers
-        #print(f"User data: {user_data}")  # Log user_data for debugging
 
-        # Extract token from user_data.  Let's be VERY explicit and check multiple places.
-        token = None
-        if user_data:
-            token = user_data.get('token')
-            if not token:
-                token = user_data.get('uid')  # Sometimes Firebase uses 'uid'
-            if not token:
-                token = user_data.get('user_id')  # Another possibility
-
-        # NEW: Extract user_id separately from user_data and validate
+        # Extract user_id from user_data and validate
         user_id = user_data.get('uid') or user_data.get('user_id')
         if not user_id:
             raise HTTPException(status_code=401, detail="No valid user id found")
+        print(f"Processing request for user_id: {user_id}")
 
-        # Check Authorization header directly (for debugging)
-        auth_header = request.headers.get('Authorization')
-        if auth_header:
-            #print(f"Authorization header: {auth_header}")
-            if auth_header.startswith("Bearer "):
-                header_token = auth_header.split(" ")[1]
-                #print(f"Token from header: {header_token}")
-                if not token:
-                    token = header_token # Prioritize header token if found
+        # Extract token for authentication
+        token = user_data.get('token') or user_data.get('uid') or user_data.get('user_id')
+        if not token:
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split(" ")[1]
 
         if not token:
             raise HTTPException(status_code=401, detail="No valid authentication token found")
@@ -216,10 +203,14 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
                         )
                     }
 
-                    # Add metadata fields and include userId so that the file is stored correctly.
+                    # Ensure the storage path includes the user's directory
+                    storage_path = f"users/{user_id}/images/{filename}"
+
+                    # Add metadata fields
                     data = {
-                        'prompt': prompt,  # Send prompt directly
-                        'userId': user_id,  # NEW: include user id to dictate the folder path in Firebase
+                        'prompt': prompt,
+                        'userId': user_id,
+                        'storage_path': storage_path,  # Add the storage path to ensure it's used
                         'parameters': json.dumps({
                             "prompt": prompt,
                             "aspect_ratio": aspect_ratio,
@@ -231,7 +222,10 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
                         })
                     }
 
+                    print(f"Uploading to storage path: {storage_path}")
                     print(f"Uploading with metadata:")
+                    print(f"User ID: {user_id}")
+                    print(f"Storage path: {storage_path}")
                     print(f"Prompt: {prompt}")
                     print(f"Parameters: {data['parameters']}")
 
