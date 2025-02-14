@@ -289,9 +289,9 @@ def extract_url_content(url: str) -> str:
     try:
         extract_url = "https://api.tavily.com/extract"
         payload = {
-            "url": url,
+            "urls": url,
             "include_images": False,
-            "extract_depth": "basic"
+            "extract_depth": "advanced",
         }
         headers = {
             "Authorization": f"Bearer {TAVILY_API_KEY}",
@@ -311,12 +311,20 @@ def extract_url_content(url: str) -> str:
         # Format the extracted content
         formatted_content = ""
 
-        if 'text' in content:
-            formatted_content = content['text']
-        elif 'content' in content:
-            formatted_content = content['content']
+        if content.get("results"):
+            # Get the first result's raw_content
+            result = content["results"][0]
+            if "raw_content" in result:
+                formatted_content = result["raw_content"].strip()
+            else:
+                formatted_content = "No raw content found in the extraction results"
         else:
-            formatted_content = "No content could be extracted from the URL"
+            formatted_content = "No results found in the extraction response"
+
+        if content.get("failed_results"):
+            failed_reasons = [f"- {failed.get('error', 'Unknown error')}" for failed in content["failed_results"]]
+            if failed_reasons:
+                formatted_content += "\n\nExtraction Warnings:\n" + "\n".join(failed_reasons)
 
         logger.info("\n=== URL EXTRACTION COMPLETED ===")
         logger.info(f"Total formatted content length: {len(formatted_content)} characters")
@@ -454,18 +462,17 @@ def should_continue(state: State) -> str:
     if not last_message:
         return "agent"
 
-    # If we just got a tool response, go back to agent
-    if state.get("tool_response"):
-        state["tool_response"] = None  # Clear the tool response
-        return "agent"
-
     # Check for tool calls in the message
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "tools"
     elif isinstance(last_message.content, str) and "<tool_calls>" in last_message.content:
         return "tools"
 
-    return END
+    # If we have a response but no tool calls, we're done
+    if state.get("response"):
+        return "end"
+
+    return "agent"
 
 def create_chat_graph():
     workflow = StateGraph(State)
@@ -481,7 +488,8 @@ def create_chat_graph():
         should_continue,
         {
             "tools": "tools",
-            "agent": END
+            "end": END,
+            "agent": "agent"
         }
     )
     workflow.add_edge("tools", "agent")
@@ -546,10 +554,17 @@ async def chat(request: ChatRequest):
 
         # Create and run the graph
         graph = create_chat_graph()
-        final_state = graph.invoke(initial_state)
+        try:
+            final_state = graph.invoke(initial_state)
+        except Exception as e:
+            if str(e) == "'__end__'":
+                # This is expected when the graph ends normally
+                final_state = initial_state
+            else:
+                raise
 
         # Get the response
-        response = final_state["response"]
+        response = final_state.get("response")
         if not response:
             raise ValueError("No response generated")
 
