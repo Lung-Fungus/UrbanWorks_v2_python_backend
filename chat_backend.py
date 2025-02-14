@@ -294,17 +294,30 @@ def extract_url_content(url: str) -> str:
             "Content-Type": "application/json"
         }
 
+        logger.info(f"Request payload: {payload}")
         logger.info("Making API call to Tavily extraction endpoint...")
+        
         response = requests.post(extract_url, json=payload, headers=headers)
+        logger.info(f"Response status code: {response.status_code}")
+        logger.info(f"Response headers: {response.headers}")
+        
         response.raise_for_status()
-
+        
         content = response.json()
+        logger.info(f"Successfully parsed JSON response")
+        logger.info(f"Content keys: {content.keys()}")
+        
+        if 'content' not in content:
+            logger.warning("No 'content' key found in response")
+            logger.debug(f"Full response content: {content}")
 
         # Format the extracted content
         formatted_content = "URL Content Extraction:\n\n"
         formatted_content += f"Source URL: {url}\n\n"
         formatted_content += "Extracted Content:\n"
         formatted_content += content.get('content', 'No content extracted')
+        
+        logger.info(f"Formatted content length: {len(formatted_content)}")
 
         logger.info("\n=== URL EXTRACTION COMPLETED ===")
         logger.info(f"Total formatted content length: {len(formatted_content)} characters")
