@@ -169,7 +169,7 @@ You have access to these tools:
 
 IMPORTANT CONTEXT INFORMATION:
 - The conversation history is in the <conversation_history> tag - use this to maintain context
-- The user's name is provided in the <user_displayname> tag - always use this to personalize your responses
+- The user's name is provided in the <user_displayname> tag - use this to personalize your responses
 - The current date/time is in the <current_date> tag - use this for temporal references
 - The user's message is in the <user_message> tag
 - Any tool responses will be in the <tool_response> tag - incorporate this information into your response
