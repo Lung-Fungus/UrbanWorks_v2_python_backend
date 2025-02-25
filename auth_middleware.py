@@ -14,11 +14,11 @@ class FirebaseAuthMiddleware(HTTPBearer):
                     status_code=401,
                     detail="Invalid authentication scheme. Use Bearer token."
                 )
-            
+
             decoded_token = verify_firebase_token(credentials.credentials)
             request.state.user = decoded_token
             return decoded_token
-            
+
         except Exception:
             raise HTTPException(
                 status_code=401,

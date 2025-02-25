@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, TypedDict, Annotated, Any
@@ -21,6 +21,8 @@ from config import get_api_keys, initialize_environment
 import json
 import uuid
 import requests
+from firebase_admin import auth
+from auth_middleware import firebase_auth
 
 # Initialize environment
 initialize_environment()
@@ -36,9 +38,9 @@ tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
 # Custom ChatAnthropic implementation
 class CustomChatAnthropic(BaseChatModel):
     client: Optional[anthropic.Client] = None
-    model_name: str = "claude-3-5-sonnet-20241022"
+    model_name: str = "claude-3-7-sonnet-20250219"
     temperature: float = 1.0
-    max_tokens: int = 8192
+    max_tokens: int = 64000
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -169,7 +171,7 @@ You have access to these tools:
 
 IMPORTANT CONTEXT INFORMATION:
 - The conversation history is in the <conversation_history> tag - use this to maintain context
-- The user's name is provided in the <user_displayname> tag - use this to personalize your responses
+- The user's name is provided in the <user_displayname> tag - use this to personalize your responses but do not overuse it or include it in every single resonse
 - The current date/time is in the <current_date> tag - use this for temporal references
 - The user's message is in the <user_message> tag
 - Any tool responses will be in the <tool_response> tag - incorporate this information into your response
@@ -517,14 +519,27 @@ async def graph_visualization():
         raise HTTPException(status_code=500, detail="Error generating graph visualization")
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
     try:
         # Log incoming request
         logger.info("=== NEW CHAT REQUEST ===")
         logger.info(f"Message: {request.message}")
 
-        # Get conversation history from Firestore
+        # Get conversation and verify ownership
         conversation_ref = db.collection('conversations').document(request.conversation_id)
+        conversation_doc = conversation_ref.get()
+
+        if not conversation_doc.exists:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        conversation_data = conversation_doc.to_dict()
+
+        # Verify user owns this conversation
+        conversation_owner = conversation_data.get('userId') or conversation_data.get('userid')
+        if conversation_owner != user_data['uid']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+
+        # Get conversation history from Firestore
         messages_ref = conversation_ref.collection('messages')
         messages_query = messages_ref.order_by('timestamp').stream()
 

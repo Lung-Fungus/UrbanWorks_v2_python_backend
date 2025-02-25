@@ -33,9 +33,9 @@ tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
 # Custom ChatAnthropic implementation to avoid pydantic v2 issues
 class CustomChatAnthropic(BaseChatModel):
     client: Optional[anthropic.Client] = None
-    model_name: str = "claude-3-5-sonnet-20241022"
-    temperature: float = 0.8
-    max_tokens: int = 8192
+    model_name: str = "claude-3-7-sonnet-20250219"
+    temperature: float = 1.0
+    max_tokens: int = 64000
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -136,16 +136,16 @@ async def get_template_content(template_id: str) -> str:
         if not template_doc.exists:
             raise ValueError("Template not found")
         template_data = template_doc.to_dict()
-        
+
         # Get the parsed content
         content = template_data.get('content', '')
         if not content:
             raise ValueError("Template has no content")
-            
+
         logger.info(f"Retrieved template: {template_data.get('name', 'Unknown')}")
         logger.info(f"Content length: {len(content)}")
         return content
-                
+
     except Exception as e:
         logger.error(f"Error retrieving template: {str(e)}")
         raise ValueError(f"Error retrieving template: {str(e)}")
@@ -165,18 +165,18 @@ def perform_web_search(query: str) -> str:
             include_answer=True,
             max_results=10
         )
-        
+
         # Format the results
         formatted_results = "Search Results:\n\n"
         if search_results.get("answer"):
             formatted_results += f"Summary: {search_results['answer']}\n\n"
-        
+
         formatted_results += "Sources:\n"
         for result in search_results.get("results", []):
             formatted_results += f"- {result['title']}\n"
             formatted_results += f"  URL: {result['url']}\n"
             formatted_results += f"  Content: {result['content']}\n\n"
-        
+
         logger.info(f"Web search performed for query: {query}")
         return formatted_results
     except Exception as e:
@@ -213,7 +213,7 @@ def create_agent_node():
         current_section = state.get("current_section")
         is_chat = state.get("is_chat", False)
         chat_message = state.get("chat_message")
-        
+
         # Create base system message
         base_system = """You are Clarke, an expert proposal writer for UrbanWorks architecture, specializing in creating compelling architectural, design, and construction, and business proposals.
 
@@ -223,7 +223,7 @@ You have access to these tools:
 3. get_date: Get the current date
 
 When users ask about regulations, codes, or current information, use the web_search tool to ensure accuracy.""".strip()
-        
+
         # Add user's AI instructions if they exist
         if proposal_data.get("ai_instructions"):
             system_message = f"{base_system}\n\nAdditional Instructions: {proposal_data['ai_instructions']}\n\nNote: Follow the additional user instructions while maintaining core functionality and user experience."
@@ -297,28 +297,28 @@ When users ask about regulations, codes, or current information, use the web_sea
             # Use user-defined sections instead of generating them
             sections = [section["name"] for section in sorted(proposal_data["sections"], key=lambda x: x["order"])]
             logger.info(f"Using user-defined sections: {sections}")
-            
+
             if not sections:
                 logger.error("No sections provided in the request")
                 raise ValueError("No sections provided in the request")
-            
+
             state["sections"] = sections
             first_section = sections[0]
             state["current_section"] = first_section
-            
+
             # Get section data including template
             current_section_data = next(
                 (s for s in proposal_data["sections"] if s["name"] == first_section),
                 None
             )
-            
+
             if not current_section_data or not current_section_data.get("template_content"):
                 logger.error(f"No template content found for section: {first_section}")
                 raise ValueError(f"No template content found for section: {first_section}")
-                
+
             section_description = current_section_data.get("description", "")
             section_template = current_section_data["template_content"]
-            
+
             # Generate first section
             prompt = f"""
             {markdown_formatting_guide}
@@ -355,9 +355,9 @@ When users ask about regulations, codes, or current information, use the web_sea
             sections = state.get("sections", [])
             if not sections:
                 raise ValueError("No sections found in state")
-                
+
             current_idx = sections.index(current_section)
-            
+
             if current_idx < len(sections) - 1:
                 next_section = sections[current_idx + 1]
                 logger.info(f"Moving to next section: {next_section} (from {current_section})")
@@ -375,11 +375,11 @@ When users ask about regulations, codes, or current information, use the web_sea
                     (s for s in proposal_data["sections"] if s["name"] == next_section),
                     None
                 )
-                
+
                 if not next_section_data or not next_section_data.get("template_content"):
                     logger.error(f"No template content found for section: {next_section}")
                     raise ValueError(f"No template content found for section: {next_section}")
-                    
+
                 section_description = next_section_data.get("description", "")
                 section_template = next_section_data["template_content"]
 
@@ -425,13 +425,13 @@ When users ask about regulations, codes, or current information, use the web_sea
         logger.info("Sending prompt to LLM:")
         logger.info(f"System: {system_message}")
         logger.info(f"Prompt: {prompt}")
-        
+
         try:
             response = llm.invoke([HumanMessage(content=prompt)], system=system_message)
             logger.info(f"LLM Response: {response.content}")
             messages.append(HumanMessage(content=prompt))
             messages.append(response)
-            
+
             # Store the generated section with its heading
             section_content = f"# {state['current_section']}\n\n{response.content.strip()}"
             state["generated_sections"][state["current_section"]] = section_content
@@ -449,41 +449,41 @@ When users ask about regulations, codes, or current information, use the web_sea
 def create_proposal_graph():
     workflow = StateGraph(State)
     workflow.add_node("agent", create_agent_node())
-    
+
     def should_continue(state: State) -> str:
         if state.get("is_chat", False):
             logger.info("Chat interaction complete")
             return END
-            
+
         current_section = state.get("current_section")
         sections = state.get("sections", [])
-        
+
         logger.info(f"Checking if should continue. Current section: {current_section}")
         logger.info(f"Current sections in state: {list(state.get('generated_sections', {}).keys())}")
         logger.info(f"All sections: {sections}")
-        
+
         if not sections:
             logger.info("No sections list, continuing to agent")
             return "agent"
-            
+
         if not current_section:
             logger.info("No current section, continuing to agent")
             return "agent"
-        
+
         try:
             current_idx = sections.index(current_section)
             # If we've generated all sections, end the graph
             if current_idx >= len(sections) - 1:
                 logger.info("Reached last section, ending graph")
                 return END
-            
+
             # Otherwise, continue to the next section
             logger.info(f"Continuing to next section after {current_section}")
             return "agent"
         except ValueError:
             logger.error(f"Current section '{current_section}' not found in sections list")
             raise ValueError(f"Current section '{current_section}' not found in sections list: {sections}")
-    
+
     workflow.add_conditional_edges(
         "agent",
         should_continue,
@@ -492,7 +492,7 @@ def create_proposal_graph():
             END: END
         }
     )
-    
+
     workflow.set_entry_point("agent")
     return workflow.compile()
 
@@ -501,7 +501,7 @@ async def health_check():
     return {"status": "ok"}
 
 @app.post("/generate-proposal")
-async def generate_proposal(request: ProposalRequest):
+async def generate_proposal(request: ProposalRequest, user_data: dict = Depends(firebase_auth)):
     try:
         # Initialize state
         initial_state = {
@@ -514,21 +514,22 @@ async def generate_proposal(request: ProposalRequest):
             "is_chat": False,
             "chat_message": None
         }
-        
+
         # Create and run the graph
         graph = create_proposal_graph()
         final_state = graph.invoke(initial_state)
-        
+
         # Combine sections into final proposal
         sections = [
             content 
             for section, content in final_state["generated_sections"].items()
         ]
         final_proposal = "\n\n".join(sections)
-        
+
         # Create a new proposal document in Firestore
         proposal_ref = db.collection('proposals').document()
         proposal_ref.set({
+            "userid": user_data['uid'],  # Add user ID
             "proposal_data": request.dict(),
             "generated_sections": final_state["generated_sections"],
             "sections": final_state["sections"],
@@ -538,7 +539,7 @@ async def generate_proposal(request: ProposalRequest):
             "lastMessageTimestamp": datetime.now(),
             "created_at": datetime.now()
         })
-        
+
         # Add initial messages
         messages_ref = proposal_ref.collection('messages')
         messages_ref.add({
@@ -551,14 +552,13 @@ async def generate_proposal(request: ProposalRequest):
             "content": final_proposal,
             "timestamp": datetime.now()
         })
-        
+
         return {
             "proposal": final_proposal,
             "conversation_id": proposal_ref.id
         }
-        
     except Exception as e:
-        logger.error(f"Error in generate_proposal: {str(e)}", exc_info=True)
+        logger.error(f"Error in generate-proposal endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 class ChatRequest(BaseModel):
@@ -571,16 +571,20 @@ async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
         # Get the proposal document first to get the context
         proposal_ref = db.collection('proposals').document(request.conversation_id)
         proposal_doc = proposal_ref.get()
-        
+
         if not proposal_doc.exists:
             raise HTTPException(status_code=404, detail="Proposal not found")
-            
+
         proposal_data = proposal_doc.to_dict()
-        
+
+        # Verify user owns this conversation
+        if proposal_data.get('userid') != user_data['uid']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+
         # Get the conversation messages from Firestore
         messages_ref = proposal_ref.collection('messages')
         messages_query = messages_ref.order_by('timestamp').stream()
-        
+
         # Convert Firestore messages to LangChain messages
         messages = []
         for msg in messages_query:
@@ -589,7 +593,7 @@ async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
                 messages.append(HumanMessage(content=msg_data['content']))
             else:
                 messages.append(AIMessage(content=msg_data['content']))
-        
+
         # Get the template content if it exists
         template_content = ""
         if 'template_id' in proposal_data:
@@ -597,7 +601,7 @@ async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
                 template_content = await get_template_content(proposal_data['template_id'])
             except Exception as e:
                 logger.warning(f"Could not retrieve template content: {str(e)}")
-        
+
         # Initialize state for chat with proposal context
         initial_state = {
             "messages": messages,
@@ -609,14 +613,14 @@ async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
             "is_chat": True,
             "chat_message": request.message
         }
-        
+
         # Create and run the graph
         graph = create_proposal_graph()
         final_state = graph.invoke(initial_state)
-        
+
         # Get the last assistant message
         last_message = final_state["messages"][-1]
-        
+
         # Save messages to Firestore
         messages_ref = proposal_ref.collection('messages')
         messages_ref.add({
@@ -629,15 +633,15 @@ async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
             "content": last_message.content,
             "timestamp": datetime.now()
         })
-        
+
         # Update conversation metadata
         proposal_ref.update({
             "lastMessageTimestamp": datetime.now(),
             "messageCount": firestore.Increment(2)
         })
-        
+
         return {"response": last_message.content}
-        
+
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

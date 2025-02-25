@@ -475,5 +475,60 @@ async def move_image(
         print(f"Error moving image: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/delete-folder")
+async def delete_folder(
+    folder_name: str = Form(...),
+    user_id: str = Form(...),
+    user_data: dict = Depends(firebase_auth)
+):
+    try:
+        print(f"\n=== Starting folder deletion process for folder '{folder_name}' ===")
+
+        # Verify user has access
+        auth_user_id = user_data.get('uid')
+        if not auth_user_id:
+            raise HTTPException(status_code=401, detail="No valid user id found")
+
+        # Verify the user_id matches the authenticated user
+        if auth_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Sanitize folder name
+        folder_name = "".join(c for c in folder_name if c.isalnum() or c in (' ', '-', '_')).strip()
+        if not folder_name or folder_name == "Uncategorized":
+            raise HTTPException(status_code=400, detail="Cannot delete the Uncategorized folder")
+
+        # Check if folder has any images
+        bucket = storage.bucket()
+        prefix = f"users/{user_id}/images/{folder_name}/"
+        print(f"Checking for images in folder: {prefix}")
+
+        # List all blobs in the folder
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        if len(blobs) > 0:
+            print(f"Found {len(blobs)} images in folder, cannot delete")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot delete folder with {len(blobs)} images. Please move or delete images first."
+            )
+
+        print(f"Folder is empty, proceeding with deletion")
+
+        # Since Firebase Storage doesn't have actual folders (just prefixes in object paths),
+        # we don't need to delete anything from storage. We just need to update the user's
+        # preferences to remove the folder from their list.
+
+        return {
+            "success": True,
+            "message": f"Folder '{folder_name}' deleted successfully"
+        }
+
+    except HTTPException as he:
+        print(f"HTTP error deleting folder: {he.detail}")
+        raise he
+    except Exception as e:
+        print(f"Error deleting folder: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     print("Please run main.py to start the server")
