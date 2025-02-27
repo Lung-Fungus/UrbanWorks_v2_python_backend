@@ -14,6 +14,9 @@ from fastapi import Depends
 import os
 import base64
 import mimetypes
+import logging
+import re
+import pytz
 
 # Initialize environment
 initialize_environment()
@@ -59,6 +62,19 @@ api_keys = get_api_keys()
 # Initialize clients
 replicate_client = replicate.Client(api_token=api_keys["REPLICATE_API_TOKEN"])
 claude_client = anthropic.Anthropic(api_key=api_keys["ANTHROPIC_API_KEY"])
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Add console handler
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Define Central Time Zone
+central_tz = pytz.timezone('US/Central')
 
 async def improve_prompt(prompt: str) -> str:
     system_prompt = """You are an expert at writing prompts for FLUX image generation. 
@@ -178,8 +194,9 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
             response = requests.get(output_url)
             print(f"Download response status: {response.status_code}")
             if response.status_code == 200:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"generated_image_{timestamp}.{output_format}"
+                # Generate a unique filename using timestamp
+                timestamp = datetime.now(central_tz).strftime('%Y%m%d_%H%M%S')
+                filename = f"{timestamp}_{prompt[:30]}.png"
                 print(f"Preparing to upload with filename: {filename}")
 
                 # Create file-like object for the image
@@ -298,27 +315,36 @@ async def generate_image(request: Request, user_data: dict = Depends(firebase_au
 async def delete_image(storage_path: str):
     try:
         print(f"Attempting to delete image at path: {storage_path}")
-        # Use the delete endpoint from firestore_upload
-        async with httpx.AsyncClient() as client:
-            # The firestore_upload endpoint expects 'path' not 'storage_path'
-            response = await client.delete(f'/upload/delete?path={storage_path}')
 
-            if response.status_code != 200:
-                response_text = await response.aread()
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Failed to delete image: {response_text.decode('utf-8')}"
-                )
+        if not storage_path or storage_path.strip() == "":
+            raise HTTPException(status_code=400, detail="Invalid storage path: Path cannot be empty")
 
-            print("Image deleted successfully")
-            return {"success": True, "message": "Image deleted successfully"}
+        # Get the blob from the bucket and delete it directly
+        blob = bucket.blob(storage_path)
+        print(f"Checking if blob exists at path: {storage_path}")
+
+        if not blob.exists():
+            print(f"Blob not found at path: {storage_path}")
+            raise HTTPException(status_code=404, detail=f"Image not found at path: {storage_path}")
+
+        # Delete the blob
+        print(f"Blob found, proceeding with deletion")
+        blob.delete()
+
+        print(f"Image at path {storage_path} deleted successfully")
+        return {"success": True, "message": "Image deleted successfully", "path": storage_path}
 
     except HTTPException as he:
         print(f"HTTP error deleting image: {he.detail}")
         raise he
     except Exception as e:
-        print(f"Error deleting image: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_message = str(e)
+        print(f"Error deleting image: {error_message}")
+        # Include more context in the error
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to delete image at {storage_path}: {error_message}"
+        )
 
 @app.get("/get-image")
 async def get_image(storage_path: str = Query(...), user_data: dict = Depends(firebase_auth)):
@@ -367,6 +393,7 @@ async def list_images(user_id: str = Query(..., description="User ID to list ima
 
         images = []
         folders = set(["Uncategorized"])  # Track unique folders
+        folder_image_counts = {"Uncategorized": 0}  # Track image counts per folder
 
         for blob in blobs:
             if blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
@@ -375,8 +402,11 @@ async def list_images(user_id: str = Query(..., description="User ID to list ima
                 if len(path_parts) >= 5:  # users/user_id/images/folder/filename
                     folder = path_parts[-2]
                     folders.add(folder)
+                    # Increment folder image count
+                    folder_image_counts[folder] = folder_image_counts.get(folder, 0) + 1
                 else:
                     folder = "Uncategorized"
+                    folder_image_counts["Uncategorized"] += 1
 
                 # Generate a signed URL that expires in 1 hour
                 signed_url = blob.generate_signed_url(
@@ -406,9 +436,12 @@ async def list_images(user_id: str = Query(..., description="User ID to list ima
                 images.append(image_data)
 
         print(f"Found {len(images)} images in {len(folders)} folders")
+        print(f"Folder image counts: {folder_image_counts}")
+
         return {
             "images": images,
-            "folders": list(folders)
+            "folders": list(folders),
+            "folder_image_counts": folder_image_counts
         }
     except Exception as e:
         print(f"\n=== Error listing images ===")
@@ -479,6 +512,7 @@ async def move_image(
 async def delete_folder(
     folder_name: str = Form(...),
     user_id: str = Form(...),
+    force_delete: bool = Form(False),  # Add force_delete parameter with default False
     user_data: dict = Depends(firebase_auth)
 ):
     try:
@@ -505,18 +539,37 @@ async def delete_folder(
 
         # List all blobs in the folder
         blobs = list(bucket.list_blobs(prefix=prefix))
-        if len(blobs) > 0:
-            print(f"Found {len(blobs)} images in folder, cannot delete")
+
+        # Count only image files for the error message
+        image_blobs = [blob for blob in blobs if blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))]
+        non_image_blobs = [blob for blob in blobs if not blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))]
+
+        print(f"Found {len(image_blobs)} images and {len(non_image_blobs)} other files in folder")
+
+        if len(image_blobs) > 0 and not force_delete:
+            print(f"Found {len(image_blobs)} images in folder, cannot delete")
             raise HTTPException(
                 status_code=400, 
-                detail=f"Cannot delete folder with {len(blobs)} images. Please move or delete images first."
+                detail=f"Cannot delete folder with {len(image_blobs)} images. Please move or delete images first."
             )
 
-        print(f"Folder is empty, proceeding with deletion")
+        # If force_delete is True, we'll delete all files in the folder
+        if len(blobs) > 0 and force_delete:
+            print(f"Force deleting folder with {len(blobs)} files")
+
+            # Delete all blobs in the folder
+            for blob in blobs:
+                try:
+                    print(f"Deleting file: {blob.name}")
+                    blob.delete()
+                except Exception as e:
+                    print(f"Error deleting file {blob.name}: {str(e)}")
+                    # Continue with other files even if one fails
+
+        print(f"Folder is empty or all files deleted, proceeding with deletion")
 
         # Since Firebase Storage doesn't have actual folders (just prefixes in object paths),
-        # we don't need to delete anything from storage. We just need to update the user's
-        # preferences to remove the folder from their list.
+        # we don't need to do anything else to delete the folder.
 
         return {
             "success": True,
@@ -528,6 +581,69 @@ async def delete_folder(
         raise he
     except Exception as e:
         print(f"Error deleting folder: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/create-folder")
+async def create_folder(
+    folder_name: str = Form(...),
+    user_id: str = Form(...),
+    user_data: dict = Depends(firebase_auth)
+):
+    try:
+        print(f"\n=== Starting folder creation process for folder '{folder_name}' ===")
+
+        # Verify user has access
+        auth_user_id = user_data.get('uid')
+        if not auth_user_id:
+            raise HTTPException(status_code=401, detail="No valid user id found")
+
+        # Verify the user_id matches the authenticated user
+        if auth_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Sanitize folder name
+        folder_name = "".join(c for c in folder_name if c.isalnum() or c in (' ', '-', '_')).strip()
+        if not folder_name:
+            raise HTTPException(status_code=400, detail="Invalid folder name")
+
+        if folder_name == "Uncategorized":
+            # Uncategorized folder always exists, no need to create it
+            return {
+                "success": True,
+                "message": "Uncategorized folder already exists"
+            }
+
+        # Check if folder already exists
+        bucket = storage.bucket()
+        prefix = f"users/{user_id}/images/{folder_name}/"
+        blobs = list(bucket.list_blobs(prefix=prefix))
+
+        if len(blobs) > 0:
+            print(f"Folder '{folder_name}' already exists with {len(blobs)} files")
+            return {
+                "success": True,
+                "message": f"Folder '{folder_name}' already exists"
+            }
+
+        # Create a placeholder.txt file to ensure the folder exists
+        placeholder_path = f"users/{user_id}/images/{folder_name}/placeholder.txt"
+        placeholder_blob = bucket.blob(placeholder_path)
+        placeholder_blob.upload_from_string(
+            f"This is a placeholder file to ensure the folder '{folder_name}' exists. Created at {datetime.now(central_tz).isoformat()}"
+        )
+
+        print(f"Created folder '{folder_name}' with placeholder file")
+
+        return {
+            "success": True,
+            "message": f"Folder '{folder_name}' created successfully"
+        }
+
+    except HTTPException as he:
+        print(f"HTTP error creating folder: {he.detail}")
+        raise he
+    except Exception as e:
+        print(f"Error creating folder: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

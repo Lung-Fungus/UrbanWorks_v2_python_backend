@@ -18,6 +18,8 @@ from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.outputs import ChatGeneration, ChatResult
 from tavily import TavilyClient
 from config import get_api_keys, get_firebase_credentials, initialize_environment
+import pytz  # Add pytz for timezone handling
+from prompts import get_clarke_system_prompt  # Import the system prompt
 
 # Initialize environment
 initialize_environment()
@@ -118,11 +120,13 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        #logging.FileHandler('proposal_generator.log')
+        logging.StreamHandler(),  # Add console handler
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Define Central Time Zone
+central_tz = pytz.timezone('US/Central')
 
 # Define tools
 LLAMA_CLOUD_API_KEY = os.getenv("LLAMA_CLOUD_API_KEY")
@@ -152,7 +156,7 @@ async def get_template_content(template_id: str) -> str:
 
 def get_current_date() -> str:
     """Get the current date in a formatted string."""
-    return datetime.now().strftime("%B %d, %Y")
+    return datetime.now(central_tz).strftime("%B %d, %Y")
 
 def perform_web_search(query: str) -> str:
     """
@@ -536,8 +540,8 @@ async def generate_proposal(request: ProposalRequest, user_data: dict = Depends(
             "title": f"Proposal: {request.proposal_name}",
             "summary": f"Proposal for {request.client_name}",
             "messageCount": 2,
-            "lastMessageTimestamp": datetime.now(),
-            "created_at": datetime.now()
+            "lastMessageTimestamp": datetime.now(central_tz),
+            "created_at": datetime.now(central_tz)
         })
 
         # Add initial messages
@@ -545,12 +549,12 @@ async def generate_proposal(request: ProposalRequest, user_data: dict = Depends(
         messages_ref.add({
             "role": "user",
             "content": f"Generate a proposal for {request.proposal_name}",
-            "timestamp": datetime.now()
+            "timestamp": datetime.now(central_tz)
         })
         messages_ref.add({
             "role": "assistant",
             "content": final_proposal,
-            "timestamp": datetime.now()
+            "timestamp": datetime.now(central_tz)
         })
 
         return {
@@ -626,17 +630,17 @@ async def chat(request: ChatRequest, user_data: dict = Depends(firebase_auth)):
         messages_ref.add({
             "role": "user",
             "content": request.message,
-            "timestamp": datetime.now()
+            "timestamp": datetime.now(central_tz)
         })
         messages_ref.add({
             "role": "assistant",
             "content": last_message.content,
-            "timestamp": datetime.now()
+            "timestamp": datetime.now(central_tz)
         })
 
         # Update conversation metadata
         proposal_ref.update({
-            "lastMessageTimestamp": datetime.now(),
+            "lastMessageTimestamp": datetime.now(central_tz),
             "messageCount": firestore.Increment(2)
         })
 

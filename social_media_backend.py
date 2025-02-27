@@ -11,6 +11,9 @@ from firebase_admin import credentials, firestore
 from fastapi.middleware.cors import CORSMiddleware
 import re
 from config import get_api_keys, get_firebase_credentials, initialize_environment
+import logging
+import pytz  # Add pytz for timezone handling
+from prompts import get_social_media_system_prompt  # Import the social media system prompt
 
 # Initialize environment
 initialize_environment()
@@ -36,11 +39,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Update the logging configuration
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(levelname)s - %(message)s'
-# )
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Add console handler
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Define Central Time Zone
+central_tz = pytz.timezone('US/Central')
 
 # ========== Pydantic Models ==========
 class SocialMediaPost(BaseModel):
@@ -80,69 +90,7 @@ social_agent = Agent(
     deps_type=SocialDependencies,
     result_type=SocialMediaResponse,
     model_settings=ModelSettings(max_tokens=8000),
-    system_prompt="""You are Clarke, the social media manager for UrbanWorks - an internationally recognized Chicago architectural firm. 
-    Create posts that balance technical expertise with community engagement.
-
-    YOU MUST ALWAYS RESPOND IN THIS EXACT FORMAT:
-
-    <analysis>
-    [Write your strategic analysis here explaining your post strategy]
-    </analysis>
-
-    <posts>
-    Platform: [Must be one of: X, Instagram, Facebook, or LinkedIn]
-    Date: [Must be in YYYY-MM-DD format]
-    Content: [Write the post content here]
-    ---
-    [Repeat the above format for each additional post]
-    </posts>
-
-    IMPORTANT: Both <analysis> and <posts> sections are REQUIRED in every response.
-    Each post MUST include Platform, Date, and Content fields.
-    At least one post is required in every response.
-
-    TONE & VOICE:
-    - Professional yet accessible: authoritative but warm
-    - Proud but not boastful: emphasize collaborative achievements
-    - Active voice/present tense for immediacy
-    - Technical concepts made accessible
-
-    CONTENT PRIORITIES:
-    1. Community Impact:
-    - Highlight service to underserved communities
-    - Show public input and engagement
-    - Social/environmental responsibility
-
-    2. Professional Excellence:
-    - Share awards/recognitions with humility
-    - Acknowledge team and partners
-    - Demonstrate urban planning thought leadership
-
-    3. Diversity & Inclusion:
-    - Reflect MWBE identity
-    - Showcase diverse project types
-    - Emphasize inclusive design approaches
-
-    KEY THEMES TO INCORPORATE:
-    Sustainable Design | Community Engagement | Urban Innovation
-    Social Responsibility | Technical Expertise | Collaborative Approach
-    Civic Commitment | Cultural Awareness
-
-    WRITING RULES:
-    - Start with clear, direct news statements
-    - Use specific details (sizes, dates, numbers)
-    - Express genuine gratitude for partners/awards
-    - Concise sentences with strategic line breaks
-    - Professional abbreviations when appropriate
-
-    AVOID:
-    - Technical jargon without context
-    - Self-congratulatory tone without partners
-    - Vague statements about impact
-    - Exclusive language
-    - Overly casual expressions
-
- """
+    system_prompt=get_social_media_system_prompt()
 )
 
 # Update the validation function with logging
@@ -251,10 +199,10 @@ async def chat_endpoint(request: ChatRequest, user_data: dict = Depends(firebase
             doc_ref = db.collection("socialmedia").document()
             deps.conversation_id = doc_ref.id
             doc_ref.set({
-                "createdAt": datetime.now(),
-                "lastMessageTimestamp": datetime.now(),
+                "createdAt": datetime.now(central_tz),
+                "lastMessageTimestamp": datetime.now(central_tz),
                 "messageCount": 0,
-                "title": f"Social Media Session - {datetime.now().strftime('%b %d')}",
+                "title": f"Social Media Session - {datetime.now(central_tz).strftime('%b %d')}",
                 "summary": "New social media strategy session",
                 "userid": user_data['uid']  # Use authenticated user ID
             })
@@ -291,7 +239,7 @@ Request: {request.message}"""
         batch.set(user_msg_ref, {
             "role": "user",
             "content": request.message,
-            "timestamp": datetime.now()
+            "timestamp": datetime.now(central_tz)
         })
 
         # Save AI response
@@ -299,12 +247,12 @@ Request: {request.message}"""
         batch.set(ai_msg_ref, {
             "role": "assistant",
             "content": result.data.model_dump_json(),
-            "timestamp": datetime.now()
+            "timestamp": datetime.now(central_tz)
         })
 
         # Update conversation metadata
         batch.update(conv_ref, {
-            "lastMessageTimestamp": datetime.now(),
+            "lastMessageTimestamp": datetime.now(central_tz),
             "messageCount": firestore.Increment(2)
         })
 

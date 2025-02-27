@@ -5,6 +5,7 @@ from firebase_admin import storage
 import os
 from datetime import datetime, timedelta
 from config import initialize_environment, get_firebase_config
+import pytz  # Add pytz for timezone handling
 
 # Initialize environment
 initialize_environment()
@@ -66,6 +67,9 @@ try:
 except Exception as e:
     print(f"Firebase initialization error: {e}")
 
+# Define Central Time Zone
+central_tz = pytz.timezone('US/Central')
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
@@ -109,22 +113,22 @@ async def upload_file(
         # Read file content
         content = await file.read()
 
-        # Generate unique filename while preserving original name
-        base_name, file_extension = os.path.splitext(file.filename)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # Generate a unique filename using timestamp
+        timestamp = datetime.now(central_tz).strftime('%Y%m%d_%H%M%S')
+        filename = f"{timestamp}_{os.path.basename(file.filename)}"
 
         # Use provided storage path or generate one based on user_id
         if not storage_path:
             if user_id:
                 if file.content_type.startswith('image/'):
-                    storage_path = f"users/{user_id}/images/{base_name}_{timestamp}{file_extension}"
+                    storage_path = f"users/{user_id}/images/{filename}"
                 else:
-                    storage_path = f"users/{user_id}/templates/{base_name}_{timestamp}{file_extension}"
+                    storage_path = f"users/{user_id}/templates/{filename}"
             else:
                 if file.content_type.startswith('image/'):
-                    storage_path = f"Images/{base_name}_{timestamp}{file_extension}"
+                    storage_path = f"Images/{filename}"
                 else:
-                    storage_path = f"Templates/{base_name}_{timestamp}{file_extension}"
+                    storage_path = f"Templates/{filename}"
 
         try:
             bucket = storage.bucket()
@@ -133,7 +137,7 @@ async def upload_file(
             # Set metadata
             metadata = {
                 'contentType': file.content_type,
-                'created': datetime.now().isoformat()
+                'created': datetime.now(central_tz).isoformat()
             }
 
             if user_id:
@@ -164,7 +168,7 @@ async def upload_file(
             response_data = {
                 "success": True,
                 "url": storage_url,
-                "filename": file.filename,
+                "filename": filename,
                 "content_type": file.content_type,
                 "storage_path": storage_path,
                 "prompt": prompt,
