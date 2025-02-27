@@ -15,7 +15,6 @@ import os
 import base64
 import mimetypes
 import logging
-import re
 import pytz
 
 # Initialize environment

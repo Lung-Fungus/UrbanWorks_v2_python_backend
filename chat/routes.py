@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
 from firebase_admin import firestore
 from langchain_core.messages import HumanMessage, AIMessage
-from datetime import datetime, timedelta
+from datetime import timedelta
 from .models import ChatRequest
 from .agent import create_chat_graph
 from .utils import logger, get_db, get_current_datetime
