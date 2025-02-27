@@ -4,6 +4,9 @@ from pathlib import Path
 import firebase_admin
 from firebase_admin import credentials, storage, auth
 from fastapi import HTTPException
+import logging
+
+logger = logging.getLogger(__name__)
 
 def is_replit():
     """Check if we're running on Replit"""
@@ -18,30 +21,38 @@ def get_env_var(var_name: str, default: str = None) -> str:
         # Locally, try to load from .env.local
         from dotenv import load_dotenv
         
-        # First, try with the absolute path if we know where the file is
-        absolute_path = Path('C:/Users/danie/OneDrive/Desktop/UrbanWorks_Frontend/URBANWORKS_V2/.env.local')
+        # Try these paths in order
+        paths_to_try = [
+            Path('./.env.local'),                # In current directory (backend root)
+            Path('../.env.local'),               # In parent directory
+            Path('./URBANWORKS_V2/.env.local'),  # From project root to URBANWORKS_V2
+            Path('../URBANWORKS_V2/.env.local'), # From backend dir to URBANWORKS_V2
+            # Absolute path as fallback
+            Path('C:/Users/danie/OneDrive/Desktop/UrbanWorks_Frontend/URBANWORKS_V2/.env.local')
+        ]
         
-        # If absolute path doesn't exist, try relative paths
-        if not absolute_path.exists():
-            paths_to_try = [
-                Path('../URBANWORKS_V2/.env.local'),  # From backend dir to URBANWORKS_V2
-                Path('./URBANWORKS_V2/.env.local'),   # From project root to URBANWORKS_V2
-                Path('./.env.local'),                 # In current directory
-                Path('../.env.local')                 # In parent directory
-            ]
-            
-            for path in paths_to_try:
-                if path.exists():
-                    load_dotenv(dotenv_path=path)
-                    break
-            else:
-                # If none of the paths work, try one last attempt with the absolute path
-                load_dotenv(dotenv_path=absolute_path)
-        else:
-            # Load from the absolute path
-            load_dotenv(dotenv_path=absolute_path)
-            
-        return os.getenv(var_name, default)
+        # Debug output - print current directory
+        print(f"Current directory: {os.getcwd()}")
+        
+        # Try each path
+        for path in paths_to_try:
+            print(f"Trying to load dotenv from: {path} (exists: {path.exists()})")
+            if path.exists():
+                load_dotenv(dotenv_path=path)
+                print(f"Loaded environment from {path}")
+                break
+        
+        # Check if we got the variable
+        value = os.getenv(var_name, default)
+        print(f"Value for {var_name}: {'[SET]' if value else '[NOT FOUND]'}")
+        
+        # For Anthropic specifically, print safe debug info
+        if var_name == "ANTHROPIC_API_KEY" and value:
+            key_prefix = value[:4] if len(value) > 4 else "[empty]"
+            key_length = len(value)
+            print(f"ANTHROPIC_API_KEY: prefix={key_prefix}..., length={key_length}")
+        
+        return value
 
 def get_firebase_config():
     """Get Firebase configuration"""
@@ -163,28 +174,22 @@ def initialize_environment():
     print("Environment initialized successfully")
 
 def initialize_firebase():
+    """Initialize Firebase Admin for serverless access to Firebase services."""
     if not firebase_admin._apps:
         try:
             cred = credentials.Certificate(get_firebase_credentials())
-            firebase_config = get_firebase_config()
-            bucket_name = firebase_config.get("storageBucket")
-            
-            if not bucket_name:
-                raise ValueError("Storage bucket name not found in configuration")
-                
+            # Initialize without Storage bucket to prevent permission errors
             firebase_admin.initialize_app(cred, {
-                'storageBucket': bucket_name
+                'storageBucket': None  # Disable Storage bucket
             })
-            
-            # Verify bucket exists
-            bucket = storage.bucket()
-            if not bucket.exists():
-                print(f"Warning: Bucket '{bucket_name}' does not exist")
-                print("Please create the bucket in the Firebase Console")
-                
+            logger.info("Firebase initialized successfully without Storage bucket")
+            return True
         except Exception as e:
-            print(f"Firebase initialization error: {str(e)}")
-            raise
+            logger.error(f"Failed to initialize Firebase: {str(e)}")
+            return False
+    else:
+        logger.info("Firebase already initialized")
+        return True
 
 def verify_firebase_token(token: str) -> dict:
     """
