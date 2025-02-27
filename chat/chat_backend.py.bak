@@ -21,6 +21,7 @@ from config import get_api_keys, initialize_environment
 import json
 import uuid
 import requests
+from firebase_admin import auth
 from auth_middleware import firebase_auth
 import pytz  # Add pytz for timezone handling
 from prompts import get_clarke_system_prompt  # Import the system prompt

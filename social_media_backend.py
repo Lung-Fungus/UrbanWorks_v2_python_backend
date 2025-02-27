@@ -12,6 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import re
 from config import get_api_keys, get_firebase_credentials, initialize_environment
 import logging
+import json
+import os
+import anthropic
 import pytz  # Add pytz for timezone handling
 from prompts import get_social_media_system_prompt  # Import the social media system prompt
 

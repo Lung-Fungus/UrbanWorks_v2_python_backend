@@ -17,8 +17,30 @@ def get_env_var(var_name: str, default: str = None) -> str:
     else:
         # Locally, try to load from .env.local
         from dotenv import load_dotenv
-        env_path = Path('../URBANWORKS_V2/.env.local')
-        load_dotenv(dotenv_path=env_path)
+        
+        # First, try with the absolute path if we know where the file is
+        absolute_path = Path('C:/Users/danie/OneDrive/Desktop/UrbanWorks_Frontend/URBANWORKS_V2/.env.local')
+        
+        # If absolute path doesn't exist, try relative paths
+        if not absolute_path.exists():
+            paths_to_try = [
+                Path('../URBANWORKS_V2/.env.local'),  # From backend dir to URBANWORKS_V2
+                Path('./URBANWORKS_V2/.env.local'),   # From project root to URBANWORKS_V2
+                Path('./.env.local'),                 # In current directory
+                Path('../.env.local')                 # In parent directory
+            ]
+            
+            for path in paths_to_try:
+                if path.exists():
+                    load_dotenv(dotenv_path=path)
+                    break
+            else:
+                # If none of the paths work, try one last attempt with the absolute path
+                load_dotenv(dotenv_path=absolute_path)
+        else:
+            # Load from the absolute path
+            load_dotenv(dotenv_path=absolute_path)
+            
         return os.getenv(var_name, default)
 
 def get_firebase_config():
@@ -44,22 +66,65 @@ def get_api_keys():
 
 def get_firebase_credentials():
     """Get Firebase credentials from environment or file"""
-    if is_replit():
-        # In Replit, construct from environment variables
-        creds_json = get_env_var("FIREBASE_CREDENTIALS")
-        if creds_json:
+    # First try to get from environment variable
+    creds_json = get_env_var("FIREBASE_CREDENTIALS")
+    if creds_json:
+        try:
             return json.loads(creds_json)
-        else:
-            raise ValueError("FIREBASE_CREDENTIALS not found in Replit secrets")
+        except json.JSONDecodeError:
+            # If it's not valid JSON, assume it's a filepath
+            if os.path.exists(creds_json):
+                with open(creds_json, 'r') as f:
+                    return json.load(f)
+            # Otherwise, fall through to other methods
+    
+    if is_replit():
+        # In Replit, we should already have returned above, but just in case
+        raise ValueError("FIREBASE_CREDENTIALS not found in Replit secrets")
     else:
-        # Locally, read from file
+        # Try to use environment variables to construct credentials
+        # This requires having the individual Firebase credential fields in .env.local
+        firebase_config = {}
+        try:
+            # Check for essential Firebase credential fields
+            project_id = get_env_var("FIREBASE_PROJECT_ID") or get_env_var("NEXT_PUBLIC_FIREBASE_PROJECT_ID")
+            private_key = get_env_var("FIREBASE_PRIVATE_KEY")
+            client_email = get_env_var("FIREBASE_CLIENT_EMAIL")
+            
+            if project_id and private_key and client_email:
+                # Build credentials object from environment variables
+                # Replace escaped newlines with actual newlines if present
+                if "\\n" in private_key:
+                    private_key = private_key.replace("\\n", "\n")
+                
+                firebase_config = {
+                    "type": "service_account",
+                    "project_id": project_id,
+                    "private_key": private_key,
+                    "client_email": client_email,
+                    "client_id": get_env_var("FIREBASE_CLIENT_ID", ""),
+                    "auth_uri": get_env_var("FIREBASE_AUTH_URI", "https://accounts.google.com/o/oauth2/auth"),
+                    "token_uri": get_env_var("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+                    "auth_provider_x509_cert_url": get_env_var("FIREBASE_AUTH_PROVIDER_CERT_URL", "https://www.googleapis.com/oauth2/v1/certs"),
+                    "client_x509_cert_url": get_env_var("FIREBASE_CLIENT_CERT_URL", "")
+                }
+                return firebase_config
+        except Exception as e:
+            print(f"Warning: Failed to construct Firebase credentials from environment variables: {str(e)}")
+        
+        # Finally, try to read from file
         current_dir = Path(__file__).parent.absolute()
         cred_path = current_dir / "firebase-credentials.json"
         if cred_path.exists():
             with open(cred_path, 'r') as f:
                 return json.load(f)
         else:
-            raise ValueError(f"Firebase credentials file not found at {cred_path}")
+            raise ValueError(
+                "Firebase credentials not found. Please either:\n"
+                "1. Add a firebase-credentials.json file to the backend directory, or\n"
+                "2. Add FIREBASE_CREDENTIALS as JSON in your .env.local file, or\n"
+                "3. Add individual Firebase credential environment variables: FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, FIREBASE_CLIENT_EMAIL"
+            )
 
 def initialize_environment():
     """Initialize all necessary environment variables"""

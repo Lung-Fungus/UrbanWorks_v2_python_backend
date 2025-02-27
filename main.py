@@ -1,7 +1,8 @@
 import uvicorn
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from chat_backend import app as chat_app
+# Import the router from the new chat package instead of the whole app
+from chat import router as chat_router
 from proposal_generator import app as proposal_app
 from social_media_backend import app as social_app
 from image_generation import app as image_app
@@ -29,8 +30,10 @@ async def add_auth_dependency(request, call_next):
         request.state.dependencies = [Depends(firebase_auth)]
     return await call_next(request)
 
-# Mount all the sub-applications
-app.mount("/chat", chat_app)
+# Include the router for chat instead of mounting the app
+app.include_router(chat_router, prefix="/chat")
+
+# Mount all the other sub-applications
 app.mount("/proposal", proposal_app)
 app.mount("/social", social_app)
 app.mount("/image", image_app)

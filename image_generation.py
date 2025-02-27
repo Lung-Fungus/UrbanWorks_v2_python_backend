@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 import replicate
 import anthropic
@@ -539,13 +539,13 @@ async def delete_folder(
 
         # List all blobs in the folder
         blobs = list(bucket.list_blobs(prefix=prefix))
-
+        
         # Count only image files for the error message
         image_blobs = [blob for blob in blobs if blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))]
         non_image_blobs = [blob for blob in blobs if not blob.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))]
-
+        
         print(f"Found {len(image_blobs)} images and {len(non_image_blobs)} other files in folder")
-
+        
         if len(image_blobs) > 0 and not force_delete:
             print(f"Found {len(image_blobs)} images in folder, cannot delete")
             raise HTTPException(
@@ -556,7 +556,7 @@ async def delete_folder(
         # If force_delete is True, we'll delete all files in the folder
         if len(blobs) > 0 and force_delete:
             print(f"Force deleting folder with {len(blobs)} files")
-
+            
             # Delete all blobs in the folder
             for blob in blobs:
                 try:
@@ -605,7 +605,7 @@ async def create_folder(
         folder_name = "".join(c for c in folder_name if c.isalnum() or c in (' ', '-', '_')).strip()
         if not folder_name:
             raise HTTPException(status_code=400, detail="Invalid folder name")
-
+        
         if folder_name == "Uncategorized":
             # Uncategorized folder always exists, no need to create it
             return {
@@ -617,23 +617,23 @@ async def create_folder(
         bucket = storage.bucket()
         prefix = f"users/{user_id}/images/{folder_name}/"
         blobs = list(bucket.list_blobs(prefix=prefix))
-
+        
         if len(blobs) > 0:
             print(f"Folder '{folder_name}' already exists with {len(blobs)} files")
             return {
                 "success": True,
                 "message": f"Folder '{folder_name}' already exists"
             }
-
+        
         # Create a placeholder.txt file to ensure the folder exists
         placeholder_path = f"users/{user_id}/images/{folder_name}/placeholder.txt"
         placeholder_blob = bucket.blob(placeholder_path)
         placeholder_blob.upload_from_string(
             f"This is a placeholder file to ensure the folder '{folder_name}' exists. Created at {datetime.now(central_tz).isoformat()}"
         )
-
+        
         print(f"Created folder '{folder_name}' with placeholder file")
-
+        
         return {
             "success": True,
             "message": f"Folder '{folder_name}' created successfully"
