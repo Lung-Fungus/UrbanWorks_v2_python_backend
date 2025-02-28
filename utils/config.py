@@ -31,28 +31,14 @@ def get_env_var(var_name: str, default: str = None) -> str:
             Path('C:/Users/danie/OneDrive/Desktop/UrbanWorks_Frontend/URBANWORKS_V2/.env.local')
         ]
         
-        # Debug output - print current directory
-        print(f"Current directory: {os.getcwd()}")
-        
         # Try each path
         for path in paths_to_try:
-            print(f"Trying to load dotenv from: {path} (exists: {path.exists()})")
             if path.exists():
                 load_dotenv(dotenv_path=path)
-                print(f"Loaded environment from {path}")
                 break
         
-        # Check if we got the variable
-        value = os.getenv(var_name, default)
-        print(f"Value for {var_name}: {'[SET]' if value else '[NOT FOUND]'}")
-        
-        # For Anthropic specifically, print safe debug info
-        if var_name == "ANTHROPIC_API_KEY" and value:
-            key_prefix = value[:4] if len(value) > 4 else "[empty]"
-            key_length = len(value)
-            print(f"ANTHROPIC_API_KEY: prefix={key_prefix}..., length={key_length}")
-        
-        return value
+        # Return the value
+        return os.getenv(var_name, default)
 
 def get_firebase_config():
     """Get Firebase configuration"""
@@ -121,11 +107,13 @@ def get_firebase_credentials():
                 }
                 return firebase_config
         except Exception as e:
-            print(f"Warning: Failed to construct Firebase credentials from environment variables: {str(e)}")
+            logger.warning(f"Failed to construct Firebase credentials from environment variables: {str(e)}")
         
         # Finally, try to read from file
         current_dir = Path(__file__).parent.absolute()
-        cred_path = current_dir / "firebase-credentials.json"
+        # Look in the parent directory (backend) instead of utils
+        backend_dir = current_dir.parent
+        cred_path = backend_dir / "firebase-credentials.json"
         if cred_path.exists():
             with open(cred_path, 'r') as f:
                 return json.load(f)
@@ -139,11 +127,6 @@ def get_firebase_credentials():
 
 def initialize_environment():
     """Initialize all necessary environment variables"""
-    if is_replit():
-        print("Running on Replit - using secrets for configuration")
-    else:
-        print("Running locally - using .env.local for configuration")
-
     # Test all required environment variables
     required_vars = [
         "ANTHROPIC_API_KEY",
@@ -171,25 +154,37 @@ def initialize_environment():
     except Exception as e:
         raise ValueError(f"Failed to load Firebase credentials: {str(e)}")
 
-    print("Environment initialized successfully")
+    logger.debug("Environment initialized successfully")
 
 def initialize_firebase():
-    """Initialize Firebase Admin for serverless access to Firebase services."""
+    """Initialize Firebase if it hasn't been already."""
+    print("DEBUG: initialize_firebase() function called from utils/config.py")
     if not firebase_admin._apps:
         try:
+            # Get the Firebase project ID from environment
+            project_id = get_env_var('NEXT_PUBLIC_FIREBASE_PROJECT_ID')
+            
+            # Use the correct storage bucket path
+            storage_bucket = "urbanworks-v2.firebasestorage.app"
+            print(f"DEBUG: About to initialize Firebase with bucket: {storage_bucket}")
+            
+            # Initialize with the storage bucket and service account credentials
             cred = credentials.Certificate(get_firebase_credentials())
-            # Initialize without Storage bucket to prevent permission errors
             firebase_admin.initialize_app(cred, {
-                'storageBucket': None  # Disable Storage bucket
+                'projectId': project_id,
+                'storageBucket': storage_bucket
             })
-            logger.info("Firebase initialized successfully without Storage bucket")
-            return True
+            print(f"DEBUG: Firebase initialized with bucket: {storage_bucket}")
+            print("DEBUG: Bucket creation code has been removed, this should not attempt to create a bucket")
+            
+            # Removed automatic bucket creation to prevent errors
+            # If you need to create a bucket, please do so manually in the Firebase Console
+            
         except Exception as e:
-            logger.error(f"Failed to initialize Firebase: {str(e)}")
-            return False
-    else:
-        logger.info("Firebase already initialized")
-        return True
+            print(f"DEBUG: Error in initialize_firebase: {e}")
+            logger.error(f"Error initializing Firebase: {e}")
+            # Continue without Firebase to allow local development
+            pass
 
 def verify_firebase_token(token: str) -> dict:
     """

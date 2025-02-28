@@ -2,24 +2,41 @@ import uvicorn
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import os
+from pathlib import Path
+
+# Load environment variables first
+if not os.getenv("FIREBASE_CREDENTIALS"):
+    # Try to load from .env.local
+    from dotenv import load_dotenv
+    env_path = Path("./.env.local")
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+        print(f"Loaded environment from {env_path}")
 
 # Import our config for Firebase initialization
-from config import initialize_firebase
+from utils.config import initialize_firebase, initialize_environment
 
-# First, initialize Firebase properly without Storage
+# First initialize the environment to ensure all variables are loaded
+try:
+    initialize_environment()
+except Exception as e:
+    print(f"Warning: Failed to initialize environment: {e}")
+    
+# Now initialize Firebase with all environment variables available
 initialize_firebase()
 
 # Now import all the modules that might need Firebase
 from new_chat import app as chat_app, initialize_app
 from proposal.proposal_generator import app as proposal_app
 from social_media.social_media_backend import app as social_app
-from image.image_generation import app as image_app
-from firestore_upload import app as upload_app
-from auth_middleware import firebase_auth
+from image import app as image_app
+from utils.firestore_upload import app as upload_app
+from utils.auth_middleware import firebase_auth
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )

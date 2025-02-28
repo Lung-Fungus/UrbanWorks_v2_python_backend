@@ -13,8 +13,8 @@ from firebase_admin import credentials, firestore
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from auth_middleware import firebase_auth
-from config import get_firebase_credentials
+from utils.auth_middleware import firebase_auth
+from utils.config import get_firebase_credentials
 
 from new_chat.models import ChatRequest, ChatResponse
 from new_chat.agent import (
@@ -44,15 +44,30 @@ def initialize_app():
     """Initialize the application dependencies."""
     global db
     
-    # Initialize Firebase Admin if not already initialized
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(get_firebase_credentials())
-        # Initialize Firebase with storageBucket set to None to prevent automatic bucket creation
-        firebase_admin.initialize_app(cred, {
-            'storageBucket': None  # Disable automatic Storage bucket initialization
-        })
-    
-    db = firestore.client()
+    try:
+        # Since main.py should have already initialized Firebase, we just need to get the client
+        db = firestore.client()
+        print("Successfully initialized Firestore client in new_chat app")
+    except Exception as e:
+        # If an error occurs, try initializing Firebase ourselves
+        if not firebase_admin._apps:
+            try:
+                print("Firebase not initialized, initializing now in new_chat app...")
+                cred = credentials.Certificate(get_firebase_credentials())
+                # Initialize Firebase with storageBucket set to None to prevent automatic bucket creation
+                firebase_admin.initialize_app(cred, {
+                    'storageBucket': None  # Disable automatic Storage bucket initialization
+                })
+                db = firestore.client()
+                print("Successfully initialized Firebase in new_chat app")
+            except Exception as e:
+                print(f"Error initializing Firebase in new_chat app: {e}")
+                # Continue without Firestore - this should be handled in the routes
+                db = None
+        else:
+            # Firebase is initialized but Firestore client failed
+            print(f"Error getting Firestore client: {e}")
+            db = None
     
     return app
 
@@ -115,6 +130,27 @@ async def chat_endpoint(request: ChatRequest, user_data: Dict = Depends(firebase
         deps = ClarkeDependencies(request.conversation_id, db)
         deps.user_display_name = request.user_display_name
         deps.files = request.files
+        
+        # Fetch available collections from Firestore
+        try:
+            # Get collections specifically from the 'collections' collection
+            # These are the ones that appear in DatabaseDisplay component
+            collections_ref = db.collection('collections')
+            collections_docs = collections_ref.stream()
+            available_collections = []
+            
+            for doc in collections_docs:
+                collection_data = doc.to_dict()
+                if 'name' in collection_data:
+                    available_collections.append(collection_data['name'])
+            
+            logger.info(f"Available database collections: {available_collections}")
+            
+            # Store collections in dependencies for agent context
+            deps.available_collections = available_collections
+        except Exception as collections_error:
+            logger.error(f"Error fetching database collections: {str(collections_error)}")
+            # Continue without collections data
 
         # Log before running the agent
         logger.info("Initializing AI agent with dependencies")
@@ -144,20 +180,22 @@ async def chat_endpoint(request: ChatRequest, user_data: Dict = Depends(firebase
         # Save to Firestore
         messages_ref = conversation_ref.collection('messages')
         
-        # Save user message
-        messages_ref.add({
-            "role": "user",
-            "content": request.message,
-            "timestamp": datetime.now(central_tz)
-        })
-
-        # Save assistant message
-        messages_ref.add({
-            "role": "assistant",
-            "content": validated_result.content,
-            "analysis": validated_result.analysis,
-            "timestamp": datetime.now(central_tz)
-        })
+        # DON'T save messages here - the frontend handles this with proper formatting
+        # We only want to update the conversation metadata
+        
+        # messages_ref.add({
+        #     "role": "user",
+        #     "content": request.message,
+        #     "timestamp": datetime.now(central_tz)
+        # })
+        
+        # messages_ref.add({
+        #     "role": "assistant",
+        #     "content": validated_result.content,
+        #     "analysis": validated_result.analysis,
+        #     "file_content": validated_result.file_content,
+        #     "timestamp": datetime.now(central_tz)
+        # })
 
         # Update conversation metadata
         conversation_ref.update({
@@ -168,13 +206,16 @@ async def chat_endpoint(request: ChatRequest, user_data: Dict = Depends(firebase
         logger.info("=== CHAT REQUEST COMPLETED ===")
         logger.info(f"Final response content:\n{validated_result.content}")
         logger.info(f"Final analysis content:\n{validated_result.analysis}")
+        if validated_result.file_content:
+            logger.info(f"Final file content:\n{validated_result.file_content}")
 
         return {
             "message": {
                 "role": "assistant",
                 "content": validated_result.content
             },
-            "analysis": validated_result.analysis
+            "analysis": validated_result.analysis,
+            "file_content": validated_result.file_content
         }
 
     except ValueError as e:

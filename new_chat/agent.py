@@ -15,10 +15,11 @@ import pytz
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.settings import ModelSettings
+from firebase_admin import firestore
 
 from new_chat.models import ChatAnalysisResponse
-from config import get_api_keys
-from prompts import get_clarke_system_prompt
+from utils.config import get_api_keys
+from utils.prompts import get_clarke_system_prompt
 
 # Get API keys
 api_keys = get_api_keys()
@@ -40,6 +41,7 @@ class ClarkeDependencies:
         self.user_display_name = None
         self.files = None
         self.tool_response = None
+        self.available_collections = []
 
 # Initialize the Anthropic model
 model = AnthropicModel('claude-3-7-sonnet-20250219', api_key=ANTHROPIC_API_KEY)
@@ -65,23 +67,30 @@ async def validate_and_parse_result(result: Any) -> ChatAnalysisResponse:
 
         analysis_match = re.search(r'<analysis>(.*?)</analysis>', content, re.DOTALL)
         response_match = re.search(r'<response>(.*?)</response>', content, re.DOTALL)
+        file_content_match = re.search(r'<file_content>(.*?)</file_content>', content, re.DOTALL)
+
+        # Extract file content if available
+        file_content = file_content_match.group(1).strip() if file_content_match else None
 
         if not analysis_match or not response_match:
             # Default to full content if no specific tags
             if not analysis_match and not response_match:
                 return ChatAnalysisResponse(
                     analysis="",
-                    content=content
+                    content=content,
+                    file_content=file_content
                 )
             elif not analysis_match:
                 return ChatAnalysisResponse(
                     analysis="",
-                    content=response_match.group(1).strip()
+                    content=response_match.group(1).strip(),
+                    file_content=file_content
                 )
             else:
                 return ChatAnalysisResponse(
                     analysis=analysis_match.group(1).strip(),
-                    content=content.replace(f"<analysis>{analysis_match.group(1)}</analysis>", "").strip()
+                    content=content.replace(f"<analysis>{analysis_match.group(1)}</analysis>", "").strip(),
+                    file_content=file_content
                 )
 
         analysis = analysis_match.group(1).strip()
@@ -89,7 +98,8 @@ async def validate_and_parse_result(result: Any) -> ChatAnalysisResponse:
 
         return ChatAnalysisResponse(
             analysis=analysis,
-            content=main_response
+            content=main_response,
+            file_content=file_content
         )
 
     except Exception as e:
@@ -218,25 +228,133 @@ async def extract_url(ctx: RunContext[ClarkeDependencies], url: str) -> str:
 
 @clarke_agent.tool
 async def get_conversation_history(ctx: RunContext[ClarkeDependencies]) -> List[Dict]:
-    """Retrieves conversation history from Firestore."""
+    """Gets the conversation history."""
+    # Just return an empty list for now
+    return []
+
+@clarke_agent.tool
+async def get_urbanworks_collection_data(ctx: RunContext[ClarkeDependencies], collection_name: str) -> Dict:
+    """
+    Retrieves all data from an UrbanWorks Firestore database collection.
+    Returns all documents without any limits.
+    
+    Args:
+        collection_name (str): The name of the collection to retrieve data from (e.g., "UrbanWorks Projects")
+    
+    Returns:
+        Dict: A dictionary containing collection data and metadata
+    """
     try:
-        if not ctx.deps.conversation_id or not ctx.deps.db:
-            return []
-
-        messages_ref = ctx.deps.db.collection("conversations").document(
-            ctx.deps.conversation_id).collection("messages")
-        docs = messages_ref.order_by("timestamp").stream()
-
-        return [
-            {
-                "role": doc.get("role"),
-                "content": doc.get("content"),
-                "timestamp": doc.get("timestamp").isoformat() if doc.get("timestamp") else None
-            } for doc in docs
-        ]
+        logger.info(f"Retrieving data from UrbanWorks collection: {collection_name}")
+        try:
+            db = firestore.client()
+        except Exception as e:
+            logger.error(f"Error getting Firestore client: {str(e)}")
+            return {
+                "status": "error",
+                "message": "Unable to connect to the database",
+                "documents": []
+            }
+        
+        # Get collection data - retrieve all documents (no limit)
+        collection_ref = db.collection(collection_name)
+        docs = collection_ref.stream()
+        
+        # Extract document data
+        documents = []
+        for doc in docs:
+            doc_data = doc.to_dict()
+            doc_data['id'] = doc.id  # Add document ID
+            documents.append(doc_data)
+        
+        logger.info(f"Retrieved {len(documents)} documents from collection: {collection_name}")
+        
+        # Calculate field statistics to help the AI understand the data
+        field_stats = {}
+        if documents:
+            # Get all unique fields
+            all_fields = set()
+            for doc in documents:
+                all_fields.update(doc.keys())
+            
+            # Calculate stats for each field
+            for field in all_fields:
+                field_values = [doc.get(field) for doc in documents if field in doc]
+                value_types = set(type(val).__name__ for val in field_values if val is not None)
+                
+                field_stats[field] = {
+                    "count": len(field_values),
+                    "types": list(value_types),
+                    "sample_values": field_values[:3] if field_values else []
+                }
+        
+        result = {
+            "collection_name": collection_name,
+            "document_count": len(documents),
+            "documents": documents,
+            "field_stats": field_stats,
+            "retrieved_at": datetime.now(central_tz).strftime("%Y-%m-%d %H:%M:%S"),
+            "note": "This data is from the UrbanWorks internal database."
+        }
+        
+        return result
     except Exception as e:
-        logger.error(f"Error fetching conversation history: {str(e)}")
-        return []
+        error_message = f"Error retrieving collection data: {str(e)}"
+        logger.error(error_message)
+        return {
+            "error": error_message,
+            "collection_name": collection_name,
+            "documents": [],
+            "document_count": 0
+        }
+
+@clarke_agent.tool
+async def get_available_urbanworks_collections(ctx: RunContext[ClarkeDependencies]) -> Dict:
+    """
+    Retrieves a list of all available UrbanWorks database collections shown in the DatabaseDisplay component.
+    These are the collections that users can interact with through the database interface.
+    
+    Returns:
+        Dict: A dictionary containing the list of collection names
+    """
+    try:
+        logger.info("Retrieving list of available UrbanWorks collections")
+        try:
+            db = firestore.client()
+        except Exception as e:
+            logger.error(f"Error getting Firestore client: {str(e)}")
+            return {
+                "status": "error",
+                "message": "Unable to connect to the database",
+                "collections": []
+            }
+        
+        # Get collections list from the collections collection
+        collections_ref = db.collection('collections')
+        collections_docs = collections_ref.stream()
+        
+        # Extract collection names
+        collections = []
+        for doc in collections_docs:
+            collection_data = doc.to_dict()
+            if 'name' in collection_data:
+                collections.append(collection_data['name'])
+        
+        result = {
+            "collections": collections,
+            "count": len(collections),
+            "retrieved_at": datetime.now(central_tz).strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        return result
+    except Exception as e:
+        error_message = f"Error retrieving collections list: {str(e)}"
+        logger.error(error_message)
+        return {
+            "error": error_message,
+            "collections": [],
+            "count": 0
+        }
 
 # Override the run method to inject user display name into the message context
 original_run = clarke_agent.run
@@ -247,18 +365,42 @@ async def run_with_user_context(message: str, deps: ClarkeDependencies, **kwargs
     """
     logger.info(f"Running agent with user display name: {deps.user_display_name}")
     
-    # Prepare context with user display name
+    # Prepare file content if files are present
+    file_content = ""
+    if deps.files and len(deps.files) > 0:
+        file_content = "Parsed File Content:\n\n"
+        for idx, file_info in enumerate(deps.files):
+            file_content += f"File {idx + 1}: {file_info.get('filename', 'Unknown')}\n"
+            file_content += f"Content: {file_info.get('content', 'No content')}\n\n"
+        logger.info(f"Prepared file content for {len(deps.files)} files")
+    
+    # Prepare available collections
+    collections_info = ""
+    if deps.available_collections and len(deps.available_collections) > 0:
+        collections_info = "<available_collections>\n"
+        for collection in deps.available_collections:
+            collections_info += f"- {collection}\n"
+        collections_info += "</available_collections>\n"
+        logger.info(f"Including {len(deps.available_collections)} collections in context")
+    
+    # Prepare context with user display name and file content
     user_context = f"""
 <user_displayname>{deps.user_display_name}</user_displayname>
 <current_date>{deps.current_date}</current_date>
-<user_message>{message}</user_message>
+{collections_info}<user_message>{message}</user_message>
 """
     
     # Add the user context to the message
     context_message = f"{user_context}\n{message}"
     
     # Call the original run method with the enhanced message
-    return await original_run(context_message, deps=deps, **kwargs)
+    result = await original_run(context_message, deps=deps, **kwargs)
+    
+    # Add file content to the result if present
+    if isinstance(result.data, ChatAnalysisResponse) and file_content:
+        result.data.file_content = file_content
+    
+    return result
 
 # Replace the original run method with our wrapper
 clarke_agent.run = run_with_user_context 

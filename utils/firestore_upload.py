@@ -4,7 +4,7 @@ import firebase_admin
 from firebase_admin import storage
 import os
 from datetime import datetime, timedelta
-from config import initialize_environment, get_firebase_config
+from utils.config import initialize_environment, get_firebase_config
 import pytz  # Add pytz for timezone handling
 
 # Initialize environment
@@ -32,36 +32,15 @@ try:
         from config import initialize_firebase, get_firebase_config
         initialize_firebase()
 
-    # Get bucket with explicit name
-    firebase_config = get_firebase_config()
-    bucket = storage.bucket(firebase_config["storageBucket"])
+    # Use the correct bucket path
+    storage_bucket = "urbanworks-v2.firebasestorage.app"
+    bucket = storage.bucket(storage_bucket)
     print(f"Firebase initialized successfully with bucket: {bucket.name}")
 
-    # Test bucket existence and create if needed
+    # Check bucket existence but don't try to create it
     if not bucket.exists():
-        print("Bucket does not exist, attempting to create...")
-        try:
-            bucket.create()
-            print("Bucket created successfully")
-            # Set bucket CORS configuration
-            bucket.cors = [
-                {
-                    'origin': [
-                        'http://localhost:3000',
-                        'https://urbanworks-v2.web.app',
-                        'https://urbanworks-v2.firebaseapp.com',
-                        'https://urbanworks-v2-pythonbackend.replit.app'
-                    ],
-                    'method': ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-                    'responseHeader': ['Content-Type', 'Authorization'],
-                    'maxAgeSeconds': 3600
-                }
-            ]
-            bucket.patch()
-            print("Bucket CORS configuration updated")
-        except Exception as create_error:
-            print(f"Failed to create bucket: {str(create_error)}")
-            print("Please create the bucket manually in the Firebase Console")
+        print("Bucket does not exist. Please create the bucket manually in the Firebase Console.")
+        print("You must verify site or domain ownership at https://search.google.com/search-console")
     else:
         print("Bucket exists and is accessible")
 except Exception as e:

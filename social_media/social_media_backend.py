@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Depends
-from auth_middleware import firebase_auth
+from utils.auth_middleware import firebase_auth
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -10,10 +10,10 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from fastapi.middleware.cors import CORSMiddleware
 import re
-from config import get_api_keys, get_firebase_credentials, initialize_environment
+from utils.config import get_api_keys, get_firebase_credentials, initialize_environment
 import logging
 import pytz  # Add pytz for timezone handling
-from prompts import get_social_media_system_prompt  # Import the social media system prompt
+from utils.prompts import get_social_media_system_prompt  # Import the social media system prompt
 
 # Initialize environment
 initialize_environment()
@@ -23,11 +23,25 @@ api_keys = get_api_keys()
 ANTHROPIC_API_KEY = api_keys["ANTHROPIC_API_KEY"]
 
 # Initialize Firebase Admin
-if not firebase_admin._apps:
-    cred = credentials.Certificate(get_firebase_credentials())
-    firebase_admin.initialize_app(cred)
+try:
+    # Since main.py should have already initialized Firebase, we just need to get the client
+    db = firestore.client()
+except Exception as e:
+    # If an error occurs, try initializing Firebase ourselves
+    if not firebase_admin._apps:
+        try:
+            print("Firebase not initialized, initializing now in social_media_backend...")
+            cred = credentials.Certificate(get_firebase_credentials())
+            # Initialize Firebase without storage bucket to prevent automatic bucket creation
+            firebase_admin.initialize_app(cred, {
+                'storageBucket': None  # Disable automatic Storage bucket initialization
+            })
+            db = firestore.client()
+        except Exception as e:
+            print(f"Error initializing Firebase in social_media_backend: {e}")
+            # Create a placeholder db that will be replaced when Firebase is available
+            db = None
 
-db = firestore.client()
 app = FastAPI()
 
 # Add CORS middleware
@@ -41,7 +55,7 @@ app.add_middleware(
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),  # Add console handler
