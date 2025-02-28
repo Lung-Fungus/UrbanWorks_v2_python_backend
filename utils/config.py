@@ -4,9 +4,6 @@ from pathlib import Path
 import firebase_admin
 from firebase_admin import credentials, storage, auth
 from fastapi import HTTPException
-import logging
-
-logger = logging.getLogger(__name__)
 
 def is_replit():
     """Check if we're running on Replit"""
@@ -20,24 +17,8 @@ def get_env_var(var_name: str, default: str = None) -> str:
     else:
         # Locally, try to load from .env.local
         from dotenv import load_dotenv
-        
-        # Try these paths in order
-        paths_to_try = [
-            Path('./.env.local'),                # In current directory (backend root)
-            Path('../.env.local'),               # In parent directory
-            Path('./URBANWORKS_V2/.env.local'),  # From project root to URBANWORKS_V2
-            Path('../URBANWORKS_V2/.env.local'), # From backend dir to URBANWORKS_V2
-            # Absolute path as fallback
-            Path('C:/Users/danie/OneDrive/Desktop/UrbanWorks_Frontend/URBANWORKS_V2/.env.local')
-        ]
-        
-        # Try each path
-        for path in paths_to_try:
-            if path.exists():
-                load_dotenv(dotenv_path=path)
-                break
-        
-        # Return the value
+        env_path = Path('.env.local')
+        load_dotenv(dotenv_path=env_path)
         return os.getenv(var_name, default)
 
 def get_firebase_config():
@@ -63,70 +44,32 @@ def get_api_keys():
 
 def get_firebase_credentials():
     """Get Firebase credentials from environment or file"""
-    # First try to get from environment variable
-    creds_json = get_env_var("FIREBASE_CREDENTIALS")
-    if creds_json:
-        try:
-            return json.loads(creds_json)
-        except json.JSONDecodeError:
-            # If it's not valid JSON, assume it's a filepath
-            if os.path.exists(creds_json):
-                with open(creds_json, 'r') as f:
-                    return json.load(f)
-            # Otherwise, fall through to other methods
-    
     if is_replit():
-        # In Replit, we should already have returned above, but just in case
-        raise ValueError("FIREBASE_CREDENTIALS not found in Replit secrets")
+        # In Replit, construct from environment variables
+        creds_json = get_env_var("FIREBASE_CREDENTIALS")
+        if creds_json:
+            return json.loads(creds_json)
+        else:
+            raise ValueError("FIREBASE_CREDENTIALS not found in Replit secrets")
     else:
-        # Try to use environment variables to construct credentials
-        # This requires having the individual Firebase credential fields in .env.local
-        firebase_config = {}
-        try:
-            # Check for essential Firebase credential fields
-            project_id = get_env_var("FIREBASE_PROJECT_ID") or get_env_var("NEXT_PUBLIC_FIREBASE_PROJECT_ID")
-            private_key = get_env_var("FIREBASE_PRIVATE_KEY")
-            client_email = get_env_var("FIREBASE_CLIENT_EMAIL")
-            
-            if project_id and private_key and client_email:
-                # Build credentials object from environment variables
-                # Replace escaped newlines with actual newlines if present
-                if "\\n" in private_key:
-                    private_key = private_key.replace("\\n", "\n")
-                
-                firebase_config = {
-                    "type": "service_account",
-                    "project_id": project_id,
-                    "private_key": private_key,
-                    "client_email": client_email,
-                    "client_id": get_env_var("FIREBASE_CLIENT_ID", ""),
-                    "auth_uri": get_env_var("FIREBASE_AUTH_URI", "https://accounts.google.com/o/oauth2/auth"),
-                    "token_uri": get_env_var("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
-                    "auth_provider_x509_cert_url": get_env_var("FIREBASE_AUTH_PROVIDER_CERT_URL", "https://www.googleapis.com/oauth2/v1/certs"),
-                    "client_x509_cert_url": get_env_var("FIREBASE_CLIENT_CERT_URL", "")
-                }
-                return firebase_config
-        except Exception as e:
-            logger.warning(f"Failed to construct Firebase credentials from environment variables: {str(e)}")
-        
-        # Finally, try to read from file
+        # Locally, read from file
         current_dir = Path(__file__).parent.absolute()
-        # Look in the parent directory (backend) instead of utils
-        backend_dir = current_dir.parent
-        cred_path = backend_dir / "firebase-credentials.json"
+        cred_path = current_dir / "firebase-credentials.json"
         if cred_path.exists():
             with open(cred_path, 'r') as f:
                 return json.load(f)
         else:
-            raise ValueError(
-                "Firebase credentials not found. Please either:\n"
-                "1. Add a firebase-credentials.json file to the backend directory, or\n"
-                "2. Add FIREBASE_CREDENTIALS as JSON in your .env.local file, or\n"
-                "3. Add individual Firebase credential environment variables: FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, FIREBASE_CLIENT_EMAIL"
-            )
+            raise ValueError(f"Firebase credentials file not found at {cred_path}")
 
 def initialize_environment():
     """Initialize all necessary environment variables"""
+    # Only log environment info if this is the first time initializing
+    if not hasattr(initialize_environment, 'initialized'):
+        if is_replit():
+            print("Running on Replit - using secrets for configuration")
+        else:
+            print("Running locally - using .env.local for configuration")
+
     # Test all required environment variables
     required_vars = [
         "ANTHROPIC_API_KEY",
@@ -154,37 +97,35 @@ def initialize_environment():
     except Exception as e:
         raise ValueError(f"Failed to load Firebase credentials: {str(e)}")
 
-    logger.debug("Environment initialized successfully")
+    # Only log success if this is the first time initializing
+    if not hasattr(initialize_environment, 'initialized'):
+        print("Environment initialized successfully")
+        initialize_environment.initialized = True
 
 def initialize_firebase():
-    """Initialize Firebase if it hasn't been already."""
-    print("DEBUG: initialize_firebase() function called from utils/config.py")
     if not firebase_admin._apps:
         try:
-            # Get the Firebase project ID from environment
-            project_id = get_env_var('NEXT_PUBLIC_FIREBASE_PROJECT_ID')
-            
-            # Use the correct storage bucket path
-            storage_bucket = "urbanworks-v2.firebasestorage.app"
-            print(f"DEBUG: About to initialize Firebase with bucket: {storage_bucket}")
-            
-            # Initialize with the storage bucket and service account credentials
             cred = credentials.Certificate(get_firebase_credentials())
+            firebase_config = get_firebase_config()
+            bucket_name = firebase_config.get("storageBucket")
+            
+            if not bucket_name:
+                raise ValueError("Storage bucket name not found in configuration")
+                
+            # Initialize Firebase app with the storage bucket
             firebase_admin.initialize_app(cred, {
-                'projectId': project_id,
-                'storageBucket': storage_bucket
+                'storageBucket': bucket_name
             })
-            print(f"DEBUG: Firebase initialized with bucket: {storage_bucket}")
-            print("DEBUG: Bucket creation code has been removed, this should not attempt to create a bucket")
             
-            # Removed automatic bucket creation to prevent errors
-            # If you need to create a bucket, please do so manually in the Firebase Console
-            
+            # Verify bucket exists but only log if it's a problem
+            bucket = storage.bucket()
+            if not bucket.exists():
+                print(f"Warning: Bucket '{bucket_name}' does not exist")
+                print("Please create the bucket in the Firebase Console")
+                
         except Exception as e:
-            print(f"DEBUG: Error in initialize_firebase: {e}")
-            logger.error(f"Error initializing Firebase: {e}")
-            # Continue without Firebase to allow local development
-            pass
+            print(f"Firebase initialization error: {str(e)}")
+            raise
 
 def verify_firebase_token(token: str) -> dict:
     """

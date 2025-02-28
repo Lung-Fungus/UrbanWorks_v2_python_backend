@@ -30,9 +30,8 @@ except Exception as e:
     # If an error occurs, try initializing Firebase ourselves
     if not firebase_admin._apps:
         try:
-            print("Firebase not initialized, initializing now in social_media_backend...")
-            cred = credentials.Certificate(get_firebase_credentials())
             # Initialize Firebase without storage bucket to prevent automatic bucket creation
+            cred = credentials.Certificate(get_firebase_credentials())
             firebase_admin.initialize_app(cred, {
                 'storageBucket': None  # Disable automatic Storage bucket initialization
             })

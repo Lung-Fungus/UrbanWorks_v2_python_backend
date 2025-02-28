@@ -35,14 +35,11 @@ try:
     # Use the correct bucket path
     storage_bucket = "urbanworks-v2.firebasestorage.app"
     bucket = storage.bucket(storage_bucket)
-    print(f"Firebase initialized successfully with bucket: {bucket.name}")
-
+    
     # Check bucket existence but don't try to create it
     if not bucket.exists():
         print("Bucket does not exist. Please create the bucket manually in the Firebase Console.")
         print("You must verify site or domain ownership at https://search.google.com/search-console")
-    else:
-        print("Bucket exists and is accessible")
 except Exception as e:
     print(f"Firebase initialization error: {e}")
 

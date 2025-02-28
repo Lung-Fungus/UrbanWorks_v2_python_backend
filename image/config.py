@@ -35,7 +35,8 @@ claude_client = anthropic.Anthropic(api_key=api_keys["ANTHROPIC_API_KEY"])
 # Use the correct storage bucket path
 storage_bucket = "urbanworks-v2.firebasestorage.app"
 bucket = storage.bucket(storage_bucket)
-logger.info(f"Using Firebase Storage bucket: {storage_bucket}")
+# Only log at debug level to avoid duplicate messages
+logger.debug(f"Using Firebase Storage bucket: {storage_bucket}")
 
 # Supported image formats
 SUPPORTED_IMAGE_FORMATS = ('.jpg', '.jpeg', '.png', '.gif', '.webp')

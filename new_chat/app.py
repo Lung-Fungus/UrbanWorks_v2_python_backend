@@ -47,7 +47,6 @@ def initialize_app():
     try:
         # Since main.py should have already initialized Firebase, we just need to get the client
         db = firestore.client()
-        print("Successfully initialized Firestore client in new_chat app")
     except Exception as e:
         # If an error occurs, try initializing Firebase ourselves
         if not firebase_admin._apps:
@@ -59,7 +58,6 @@ def initialize_app():
                     'storageBucket': None  # Disable automatic Storage bucket initialization
                 })
                 db = firestore.client()
-                print("Successfully initialized Firebase in new_chat app")
             except Exception as e:
                 print(f"Error initializing Firebase in new_chat app: {e}")
                 # Continue without Firestore - this should be handled in the routes
