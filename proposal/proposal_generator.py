@@ -9,7 +9,6 @@ from firebase_admin import credentials, firestore
 import os
 import logging
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain.tools import Tool
 import anthropic
@@ -126,6 +125,8 @@ class State(TypedDict):
     sections: Annotated[List[str], "The list of sections to generate"]
     is_chat: Annotated[bool, "Whether this is a chat interaction"]
     chat_message: Annotated[Optional[str], "The chat message if this is a chat interaction"]
+    agent_action: Annotated[Optional[Any], "The action to be executed by a tool"]
+    tool_result: Annotated[Optional[Any], "The result from executing a tool"]
 
 # Configure logging
 logging.basicConfig(
@@ -219,7 +220,7 @@ tools = [
 
 # Initialize LangChain components
 llm = CustomChatAnthropic()
-tool_node = ToolNode(tools=tools)
+tool_executor = tool_executor(tools)
 
 # Define agent nodes
 def create_agent_node():
@@ -248,223 +249,118 @@ When users ask about regulations, codes, or current information, use the web_sea
 
         if is_chat and chat_message:
             logger.info("Processing chat message")
-            try:
-                messages.append(HumanMessage(content=chat_message))
-                response = llm.invoke(messages, system=system_message)
-                messages.append(AIMessage(content=response.content.strip()))
-                state["messages"] = messages
-                return state
-            except Exception as e:
-                logger.error(f"Error processing chat message: {str(e)}")
-                raise
-
-        # If not chat, proceed with proposal generation
-        logger.info(f"Processing section: {current_section if current_section else 'Initial'}")
-
-        markdown_formatting_guide = """
-        Format your response using proper markdown with consistent spacing:
-
-        1. For paragraphs (primary format):
-           - Write in clear, well-structured paragraphs
-           - Each paragraph should be 3-5 sentences
-           - Use strong narrative flow between paragraphs
-           - Convert all list-like information into proper paragraphs
-           - DO NOT use bullet points or lists unless explicitly requested
-           - Focus on descriptive, flowing text instead of enumeration
-
-        2. For main sections (# headings):
-           - Add 2 blank lines before each main section
-           - Use a single # for main section headers
-           - Add 1 blank line after the heading
-           - Always follow headers with a full paragraph, not a list
-
-        3. For subsections (### headings):
-           - Add 2 blank lines before subsection headers
-           - Use ### for subsection headers
-           - Add 1 blank line after the heading
-           - Always follow with a complete paragraph, never a list
-           - Use transitional phrases between subsections
-
-        4. For lists (ONLY when explicitly requested):
-           - Convert all lists into paragraphs by default
-           - Only use lists if the prompt specifically asks for them
-           - If lists are required, keep them to 3-5 items maximum
-           - Follow every list with an explanatory paragraph
-
-        5. For tables (use only when data comparison is needed):
-           - Add 2 blank lines before and 1 blank line after tables
-           - Use standard markdown table format
-           - Include a header row with column names
-           - Use | to separate columns and - for header separator
-           - Align columns using : in the separator row
-           - Follow tables with explanatory paragraphs
-
-        Example table format:
-
-        | Column 1 | Column 2 | Column 3 |
-        |:---------|:--------:|----------:|
-        | Left     | Center   | Right    |
-        | align    | align    | align    |
-
-        IMPORTANT: Write in full, flowing paragraphs. Do not use bullet points or lists unless specifically asked to do so.
-        """
-
-        if not current_section:
-            # Use user-defined sections instead of generating them
-            sections = [section["name"] for section in sorted(proposal_data["sections"], key=lambda x: x["order"])]
-            logger.info(f"Using user-defined sections: {sections}")
-
-            if not sections:
-                logger.error("No sections provided in the request")
-                raise ValueError("No sections provided in the request")
-
-            state["sections"] = sections
-            first_section = sections[0]
-            state["current_section"] = first_section
-
-            # Get section data including template
-            current_section_data = next(
-                (s for s in proposal_data["sections"] if s["name"] == first_section),
-                None
+            # For chat, we just add the human message and let the LLM respond
+            human_message = HumanMessage(content=chat_message)
+            messages.append(human_message)
+            
+            response = llm._generate(
+                messages=messages,
+                system=system_message
             )
-
-            if not current_section_data or not current_section_data.get("template_content"):
-                logger.error(f"No template content found for section: {first_section}")
-                raise ValueError(f"No template content found for section: {first_section}")
-
-            section_description = current_section_data.get("description", "")
-            section_template = current_section_data["template_content"]
-
-            # Generate first section
-            prompt = f"""
-            {markdown_formatting_guide}
-
-            Generate the content for the {first_section} section of the proposal.
-            {f'Section Description: {section_description}' if section_description else ''}
-            Do not include the section name in your response.
-
-            Project Information:
-            - Proposal Name: {proposal_data['proposal_name']}
-            - Client: {proposal_data['client_name']}
-            - Project Details: {proposal_data['project_details']}
-            - Budget: {proposal_data.get('budget', 'Not specified')}
-            - Timeline: {proposal_data.get('timeline', 'Not specified')}
-
-            Template Reference:
-            {section_template}
-
-            Additional Instructions:
-            {proposal_data.get('additional_instructions', 'None provided')}
-            {proposal_data.get('ai_instructions', '')}
-
-            IMPORTANT GUIDELINES:
-            1. Match the approximate length of the template provided (about {len(section_template.split())} words).
-            2. Do not make assumptions or add details that aren't explicitly provided.
-            3. If any information is unclear or missing, note it with [Additional information needed: specify what information].
-            4. Focus on factual information from the provided details only.
-            5. Follow any additional instructions provided above.
-            6. Maintain the style and structure of the template while adapting the content.
-
-            Format your response using proper markdown following the guide above.
+            return {"messages": messages + [response.generations[0].message]}
+        
+        # If we're generating a section
+        elif current_section:
+            logger.info(f"Generating section: {current_section}")
+            
+            # Get the current section info
+            section_info = None
+            for section in proposal_data.get("sections", []):
+                if section["name"] == current_section:
+                    section_info = section
+                    break
+            
+            if not section_info:
+                logger.error(f"Section info not found for {current_section}")
+                return {"messages": messages + [AIMessage(content=f"Error: Section info not found for {current_section}")]}
+            
+            # Construct a prompt for generating this section
+            section_prompt = f"""
+            I need you to write the {current_section} section for a proposal.
+            
+            Project Name: {proposal_data.get('proposal_name')}
+            Client: {proposal_data.get('client_name')}
+            Project Details: {proposal_data.get('project_details')}
             """
+            
+            if proposal_data.get('budget'):
+                section_prompt += f"\nBudget: {proposal_data.get('budget')}"
+            
+            if proposal_data.get('timeline'):
+                section_prompt += f"\nTimeline: {proposal_data.get('timeline')}"
+            
+            section_prompt += f"\n\nSection Description: {section_info.get('description', 'No description provided.')}"
+            
+            # If there's a template ID, we should retrieve it
+            template_id = section_info.get('template')
+            if template_id:
+                section_prompt += "\n\nI'll try to get the template for this section to help guide the writing."
+            
+            human_message = HumanMessage(content=section_prompt)
+            messages.append(human_message)
+            
+            response = llm._generate(
+                messages=messages,
+                system=system_message
+            )
+            
+            return {"messages": messages + [response.generations[0].message]}
+        
+        # Initial prompt
         else:
-            sections = state.get("sections", [])
-            if not sections:
-                raise ValueError("No sections found in state")
-
-            current_idx = sections.index(current_section)
-
-            if current_idx < len(sections) - 1:
-                next_section = sections[current_idx + 1]
-                logger.info(f"Moving to next section: {next_section} (from {current_section})")
-                state["current_section"] = next_section
-
-                # Build context from previously generated sections
-                previous_sections = []
-                for section in sections[:current_idx + 1]:
-                    content = state["generated_sections"].get(section, "").replace("# " + section + "\n\n", "")
-                    previous_sections.append(f"{section}:\n{content}")
-                previous_context = "\n\n".join(previous_sections)
-
-                # Get section data including template
-                next_section_data = next(
-                    (s for s in proposal_data["sections"] if s["name"] == next_section),
-                    None
-                )
-
-                if not next_section_data or not next_section_data.get("template_content"):
-                    logger.error(f"No template content found for section: {next_section}")
-                    raise ValueError(f"No template content found for section: {next_section}")
-
-                section_description = next_section_data.get("description", "")
-                section_template = next_section_data["template_content"]
-
-                prompt = f"""
-                {markdown_formatting_guide}
-
-                Here are the sections generated so far:
-
-                {previous_context}
-
-                Generate the content for the {next_section} section of the proposal.
-                {f'Section Description: {section_description}' if section_description else ''}
-                Make sure this section flows naturally from and complements the previous sections.
-                Do not include the section name in your response.
-
-                Project Information:
-                - Proposal Name: {proposal_data['proposal_name']}
-                - Client: {proposal_data['client_name']}
-                - Project Details: {proposal_data['project_details']}
-                - Budget: {proposal_data.get('budget', 'Not specified')}
-                - Timeline: {proposal_data.get('timeline', 'Not specified')}
-
-                Template Reference:
-                {section_template}
-
-                Additional Instructions:
-                {proposal_data.get('additional_instructions', 'None provided')}
-                {proposal_data.get('ai_instructions', '')}
-
-                IMPORTANT GUIDELINES:
-                1. Match the approximate length of the template provided (about {len(section_template.split())} words).
-                2. Do not make assumptions or add details that aren't explicitly provided.
-                3. If any information is unclear or missing, note it with [Additional information needed: specify what information].
-                4. Focus on factual information from the provided details only.
-                5. Follow any additional instructions provided above.
-                6. Maintain the style and structure of the template while adapting the content.
-
-                Format your response using proper markdown following the guide above.
-                """
-
-        # Get response from LLM with system message
-        logger.info(f"Generating content for section: {state['current_section']}")
-        logger.info("Sending prompt to LLM:")
-        logger.info(f"System: {system_message}")
-        logger.info(f"Prompt: {prompt}")
-
-        try:
-            response = llm.invoke([HumanMessage(content=prompt)], system=system_message)
-            logger.info(f"LLM Response: {response.content}")
-            messages.append(HumanMessage(content=prompt))
-            messages.append(response)
-
-            # Store the generated section with its heading
-            section_content = f"# {state['current_section']}\n\n{response.content.strip()}"
-            state["generated_sections"][state["current_section"]] = section_content
-            logger.info(f"Successfully generated content for {state['current_section']}")
-            logger.info(f"Current sections completed: {list(state['generated_sections'].keys())}")
-
-            return state
-        except Exception as e:
-            logger.error(f"Error generating content for {state['current_section']}: {str(e)}")
-            raise
-
+            logger.info("Processing initial prompt")
+            sections = ", ".join([s['name'] for s in proposal_data.get("sections", [])])
+            
+            # Construct the initial prompt
+            initial_prompt = f"""
+            I need you to help me write a proposal for the following project:
+            
+            Project Name: {proposal_data.get('proposal_name')}
+            Client: {proposal_data.get('client_name')}
+            Project Details: {proposal_data.get('project_details')}
+            """
+            
+            if proposal_data.get('budget'):
+                initial_prompt += f"\nBudget: {proposal_data.get('budget')}"
+            
+            if proposal_data.get('timeline'):
+                initial_prompt += f"\nTimeline: {proposal_data.get('timeline')}"
+            
+            if sections:
+                initial_prompt += f"\n\nThe proposal will include these sections: {sections}"
+            
+            if proposal_data.get('additional_instructions'):
+                initial_prompt += f"\n\nAdditional Instructions: {proposal_data.get('additional_instructions')}"
+            
+            human_message = HumanMessage(content=initial_prompt)
+            messages.append(human_message)
+            
+            response = llm._generate(
+                messages=messages,
+                system=system_message
+            )
+            
+            return {"messages": messages + [response.generations[0].message]}
+        
     return agent_node
+
+def tools_node(state: State):
+    """Tool executor node that executes tools."""
+    agent_action = state["agent_action"]
+    tool_name = agent_action.tool
+    tool_input = agent_action.tool_input
+    
+    # Execute the tool
+    observation = tool_executor.execute(tool_name, tool_input)
+    
+    # Update the state with the result
+    return {"tool_result": observation}
 
 # Create the graph
 def create_proposal_graph():
     workflow = StateGraph(State)
     workflow.add_node("agent", create_agent_node())
+    workflow.add_node("tools", tools_node)
 
     def should_continue(state: State) -> str:
         if state.get("is_chat", False):
@@ -500,6 +396,7 @@ def create_proposal_graph():
             logger.error(f"Current section '{current_section}' not found in sections list")
             raise ValueError(f"Current section '{current_section}' not found in sections list: {sections}")
 
+    # Define the agent's conditional edges
     workflow.add_conditional_edges(
         "agent",
         should_continue,
@@ -508,6 +405,10 @@ def create_proposal_graph():
             END: END
         }
     )
+
+    # Add edge to tools node if needed
+    workflow.add_edge("agent", "tools")
+    workflow.add_edge("tools", "agent")
 
     workflow.set_entry_point("agent")
     return workflow.compile()

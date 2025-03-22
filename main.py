@@ -28,8 +28,8 @@ initialize_firebase()
 
 # Now import all the modules that might need Firebase
 from new_chat import app as chat_app, initialize_app
-from proposal.proposal_generator import app as proposal_app
-from social_media.social_media_backend import app as social_app
+# from proposal.proposal_generator import app as proposal_app  # Temporarily disabled
+# from social_media.social_media_backend import app as social_app  # Temporarily disabled
 from image import app as image_app
 from utils.firestore_upload import app as upload_app
 from utils.auth_middleware import firebase_auth
@@ -74,8 +74,8 @@ async def add_auth_dependency(request, call_next):
 app.mount("/chat", chat_app)
 
 # Mount all the other sub-applications
-app.mount("/proposal", proposal_app)
-app.mount("/social", social_app)
+# app.mount("/proposal", proposal_app)  # Temporarily disabled
+# app.mount("/social", social_app)  # Temporarily disabled
 app.mount("/image", image_app)
 app.mount("/upload", upload_app)
 
@@ -86,8 +86,8 @@ async def root():
         "message": "UrbanWorks Backend API is running",
         "endpoints": {
             "chat": "/chat",
-            "proposal": "/proposal",
-            "social": "/social",
+            # "proposal": "/proposal",  # Temporarily disabled
+            # "social": "/social",  # Temporarily disabled
             "image": "/image",
             "upload": "/upload"
         }
