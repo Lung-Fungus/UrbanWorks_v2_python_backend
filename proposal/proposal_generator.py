@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
-from auth_middleware import firebase_auth
+from utils.auth_middleware import firebase_auth
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, TypedDict, Annotated, Any
@@ -17,9 +17,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.outputs import ChatGeneration, ChatResult
 from tavily import TavilyClient
-from config import get_api_keys, get_firebase_credentials, initialize_environment
+from utils.config import get_api_keys, get_firebase_credentials, initialize_environment
 import pytz  # Add pytz for timezone handling
-from prompts import get_clarke_system_prompt  # Import the system prompt
+from utils.prompts import get_clarke_system_prompt  # Import the system prompt
 
 # Initialize environment
 initialize_environment()
@@ -77,11 +77,23 @@ class CustomChatAnthropic(BaseChatModel):
         return "anthropic-chat"
 
 # Initialize Firebase Admin if not already initialized
-if not firebase_admin._apps:
-    cred = credentials.Certificate(get_firebase_credentials())
-    firebase_admin.initialize_app(cred)
-
-db = firestore.client()
+try:
+    # Since main.py should have already initialized Firebase, we just need to get the client
+    db = firestore.client()
+except Exception as e:
+    # If an error occurs, try initializing Firebase ourselves
+    if not firebase_admin._apps:
+        try:
+            # Initialize Firebase without storage bucket to prevent automatic bucket creation
+            cred = credentials.Certificate(get_firebase_credentials())
+            firebase_admin.initialize_app(cred, {
+                'storageBucket': None  # Disable automatic Storage bucket initialization
+            })
+            db = firestore.client()
+        except Exception as e:
+            print(f"Error initializing Firebase in proposal generator: {e}")
+            # Create a placeholder db that will be replaced when Firebase is available
+            db = None
 
 app = FastAPI()
 
@@ -117,7 +129,7 @@ class State(TypedDict):
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),  # Add console handler

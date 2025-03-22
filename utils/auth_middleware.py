@@ -1,6 +1,6 @@
 from fastapi import Request, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from config import verify_firebase_token
+from utils.config import verify_firebase_token
 
 class FirebaseAuthMiddleware(HTTPBearer):
     def __init__(self, auto_error: bool = True):

@@ -17,7 +17,7 @@ def get_env_var(var_name: str, default: str = None) -> str:
     else:
         # Locally, try to load from .env.local
         from dotenv import load_dotenv
-        env_path = Path('../URBANWORKS_V2/.env.local')
+        env_path = Path('.env.local')
         load_dotenv(dotenv_path=env_path)
         return os.getenv(var_name, default)
 
@@ -63,10 +63,12 @@ def get_firebase_credentials():
 
 def initialize_environment():
     """Initialize all necessary environment variables"""
-    if is_replit():
-        print("Running on Replit - using secrets for configuration")
-    else:
-        print("Running locally - using .env.local for configuration")
+    # Only log environment info if this is the first time initializing
+    if not hasattr(initialize_environment, 'initialized'):
+        if is_replit():
+            print("Running on Replit - using secrets for configuration")
+        else:
+            print("Running locally - using .env.local for configuration")
 
     # Test all required environment variables
     required_vars = [
@@ -95,7 +97,10 @@ def initialize_environment():
     except Exception as e:
         raise ValueError(f"Failed to load Firebase credentials: {str(e)}")
 
-    print("Environment initialized successfully")
+    # Only log success if this is the first time initializing
+    if not hasattr(initialize_environment, 'initialized'):
+        print("Environment initialized successfully")
+        initialize_environment.initialized = True
 
 def initialize_firebase():
     if not firebase_admin._apps:
@@ -107,11 +112,12 @@ def initialize_firebase():
             if not bucket_name:
                 raise ValueError("Storage bucket name not found in configuration")
                 
+            # Initialize Firebase app with the storage bucket
             firebase_admin.initialize_app(cred, {
                 'storageBucket': bucket_name
             })
             
-            # Verify bucket exists
+            # Verify bucket exists but only log if it's a problem
             bucket = storage.bucket()
             if not bucket.exists():
                 print(f"Warning: Bucket '{bucket_name}' does not exist")
