@@ -19,7 +19,8 @@ app.add_middleware(
         "http://localhost:3000",
         "https://urbanworks-v2.web.app",
         "https://urbanworks-v2.firebaseapp.com",
-        "https://urbanworks-v2-pythonbackend.replit.app"
+        "https://urbanworks-v2-pythonbackend.replit.app",
+        
     ],
     allow_credentials=True,
     allow_methods=["*"],
