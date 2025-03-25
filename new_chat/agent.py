@@ -115,7 +115,7 @@ async def web_search(ctx: RunContext[ClarkeDependencies], query: str) -> str:
     logger.info(f"Search query: {query}")
     try:
         logger.info("Making API call to Tavily...")
-        
+
         search_url = "https://api.tavily.com/search"
         payload = {
             "query": query,
@@ -127,7 +127,7 @@ async def web_search(ctx: RunContext[ClarkeDependencies], query: str) -> str:
             "Authorization": f"Bearer {TAVILY_API_KEY}",
             "Content-Type": "application/json"
         }
-        
+
         response = requests.post(search_url, json=payload, headers=headers)
         response.raise_for_status()
         search_results = response.json()
@@ -156,10 +156,10 @@ async def web_search(ctx: RunContext[ClarkeDependencies], query: str) -> str:
 
         logger.info("\n=== WEB SEARCH COMPLETED ===")
         logger.info(f"Total formatted results length: {len(formatted_results)} characters")
-        
+
         # Store the tool response for context
         ctx.deps.tool_response = formatted_results
-        
+
         return formatted_results
     except Exception as e:
         logger.error(f"Error performing web search: {str(e)}", exc_info=True)
@@ -215,10 +215,10 @@ async def extract_url(ctx: RunContext[ClarkeDependencies], url: str) -> str:
 
         logger.info("\n=== URL EXTRACTION COMPLETED ===")
         logger.info(f"Total formatted content length: {len(formatted_content)} characters")
-        
+
         # Store the tool response for context
         ctx.deps.tool_response = formatted_content
-        
+
         return formatted_content
 
     except Exception as e:
@@ -229,18 +229,51 @@ async def extract_url(ctx: RunContext[ClarkeDependencies], url: str) -> str:
 @clarke_agent.tool
 async def get_conversation_history(ctx: RunContext[ClarkeDependencies]) -> List[Dict]:
     """Gets the conversation history."""
-    # Just return an empty list for now
-    return []
+    try:
+        # Get the conversation ID from dependencies
+        conversation_id = ctx.deps.conversation_id
+        if not conversation_id:
+            logger.warning("No conversation ID provided, returning empty history")
+            return []
+
+        # Check if db is available in dependencies
+        if not ctx.deps.db:
+            logger.error("Firestore DB not available in dependencies")
+            return []
+
+        # Get messages collection for this conversation
+        messages_ref = ctx.deps.db.collection('conversations').document(conversation_id).collection('messages')
+
+        # Order by timestamp and get all messages
+        messages_query = messages_ref.order_by('timestamp')
+        messages_docs = messages_query.stream()
+
+        # Format messages for context
+        conversation_history = []
+        for doc in messages_docs:
+            message_data = doc.to_dict()
+            conversation_history.append({
+                "role": message_data.get("role", "unknown"),
+                "content": message_data.get("content", ""),
+                "timestamp": message_data.get("timestamp", None)
+            })
+
+        logger.info(f"Retrieved {len(conversation_history)} messages from conversation history")
+        return conversation_history
+
+    except Exception as e:
+        logger.error(f"Error retrieving conversation history: {str(e)}", exc_info=True)
+        return []
 
 @clarke_agent.tool
 async def get_urbanworks_collection_data(ctx: RunContext[ClarkeDependencies], collection_name: str) -> Dict:
     """
     Retrieves all data from an UrbanWorks Firestore database collection.
     Returns all documents without any limits.
-    
+
     Args:
         collection_name (str): The name of the collection to retrieve data from (e.g., "UrbanWorks Projects")
-    
+
     Returns:
         Dict: A dictionary containing collection data and metadata
     """
@@ -255,20 +288,20 @@ async def get_urbanworks_collection_data(ctx: RunContext[ClarkeDependencies], co
                 "message": "Unable to connect to the database",
                 "documents": []
             }
-        
+
         # Get collection data - retrieve all documents (no limit)
         collection_ref = db.collection(collection_name)
         docs = collection_ref.stream()
-        
+
         # Extract document data
         documents = []
         for doc in docs:
             doc_data = doc.to_dict()
             doc_data['id'] = doc.id  # Add document ID
             documents.append(doc_data)
-        
+
         logger.info(f"Retrieved {len(documents)} documents from collection: {collection_name}")
-        
+
         # Calculate field statistics to help the AI understand the data
         field_stats = {}
         if documents:
@@ -276,18 +309,18 @@ async def get_urbanworks_collection_data(ctx: RunContext[ClarkeDependencies], co
             all_fields = set()
             for doc in documents:
                 all_fields.update(doc.keys())
-            
+
             # Calculate stats for each field
             for field in all_fields:
                 field_values = [doc.get(field) for doc in documents if field in doc]
                 value_types = set(type(val).__name__ for val in field_values if val is not None)
-                
+
                 field_stats[field] = {
                     "count": len(field_values),
                     "types": list(value_types),
                     "sample_values": field_values[:3] if field_values else []
                 }
-        
+
         result = {
             "collection_name": collection_name,
             "document_count": len(documents),
@@ -296,7 +329,7 @@ async def get_urbanworks_collection_data(ctx: RunContext[ClarkeDependencies], co
             "retrieved_at": datetime.now(central_tz).strftime("%Y-%m-%d %H:%M:%S"),
             "note": "This data is from the UrbanWorks internal database."
         }
-        
+
         return result
     except Exception as e:
         error_message = f"Error retrieving collection data: {str(e)}"
@@ -313,7 +346,7 @@ async def get_available_urbanworks_collections(ctx: RunContext[ClarkeDependencie
     """
     Retrieves a list of all available UrbanWorks database collections shown in the DatabaseDisplay component.
     These are the collections that users can interact with through the database interface.
-    
+
     Returns:
         Dict: A dictionary containing the list of collection names
     """
@@ -328,24 +361,24 @@ async def get_available_urbanworks_collections(ctx: RunContext[ClarkeDependencie
                 "message": "Unable to connect to the database",
                 "collections": []
             }
-        
+
         # Get collections list from the collections collection
         collections_ref = db.collection('collections')
         collections_docs = collections_ref.stream()
-        
+
         # Extract collection names
         collections = []
         for doc in collections_docs:
             collection_data = doc.to_dict()
             if 'name' in collection_data:
                 collections.append(collection_data['name'])
-        
+
         result = {
             "collections": collections,
             "count": len(collections),
             "retrieved_at": datetime.now(central_tz).strftime("%Y-%m-%d %H:%M:%S")
         }
-        
+
         return result
     except Exception as e:
         error_message = f"Error retrieving collections list: {str(e)}"
@@ -364,7 +397,7 @@ async def run_with_user_context(message: str, deps: ClarkeDependencies, **kwargs
     Wrapper for the agent run method that injects the user display name into the context.
     """
     logger.info(f"Running agent with user display name: {deps.user_display_name}")
-    
+
     # Prepare file content if files are present
     file_content = ""
     if deps.files and len(deps.files) > 0:
@@ -373,7 +406,7 @@ async def run_with_user_context(message: str, deps: ClarkeDependencies, **kwargs
             file_content += f"File {idx + 1}: {file_info.get('filename', 'Unknown')}\n"
             file_content += f"Content: {file_info.get('content', 'No content')}\n\n"
         logger.info(f"Prepared file content for {len(deps.files)} files")
-    
+
     # Prepare available collections
     collections_info = ""
     if deps.available_collections and len(deps.available_collections) > 0:
@@ -382,24 +415,24 @@ async def run_with_user_context(message: str, deps: ClarkeDependencies, **kwargs
             collections_info += f"- {collection}\n"
         collections_info += "</available_collections>\n"
         logger.info(f"Including {len(deps.available_collections)} collections in context")
-    
+
     # Prepare context with user display name and file content
     user_context = f"""
 <user_displayname>{deps.user_display_name}</user_displayname>
 <current_date>{deps.current_date}</current_date>
 {collections_info}<user_message>{message}</user_message>
 """
-    
+
     # Add the user context to the message
     context_message = f"{user_context}\n{message}"
-    
+
     # Call the original run method with the enhanced message
     result = await original_run(context_message, deps=deps, **kwargs)
-    
+
     # Add file content to the result if present
     if isinstance(result.data, ChatAnalysisResponse) and file_content:
         result.data.file_content = file_content
-    
+
     return result
 
 # Replace the original run method with our wrapper

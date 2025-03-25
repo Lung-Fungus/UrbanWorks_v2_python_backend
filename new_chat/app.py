@@ -43,7 +43,7 @@ db = None
 def initialize_app():
     """Initialize the application dependencies."""
     global db
-    
+
     try:
         # Since main.py should have already initialized Firebase, we just need to get the client
         db = firestore.client()
@@ -66,7 +66,7 @@ def initialize_app():
             # Firebase is initialized but Firestore client failed
             print(f"Error getting Firestore client: {e}")
             db = None
-    
+
     return app
 
 # ========== API Endpoints ==========
@@ -128,7 +128,7 @@ async def chat_endpoint(request: ChatRequest, user_data: Dict = Depends(firebase
         deps = ClarkeDependencies(request.conversation_id, db)
         deps.user_display_name = request.user_display_name
         deps.files = request.files
-        
+
         # Fetch available collections from Firestore
         try:
             # Get collections specifically from the 'collections' collection
@@ -136,14 +136,14 @@ async def chat_endpoint(request: ChatRequest, user_data: Dict = Depends(firebase
             collections_ref = db.collection('collections')
             collections_docs = collections_ref.stream()
             available_collections = []
-            
+
             for doc in collections_docs:
                 collection_data = doc.to_dict()
                 if 'name' in collection_data:
                     available_collections.append(collection_data['name'])
-            
+
             logger.info(f"Available database collections: {available_collections}")
-            
+
             # Store collections in dependencies for agent context
             deps.available_collections = available_collections
         except Exception as collections_error:
@@ -152,7 +152,7 @@ async def chat_endpoint(request: ChatRequest, user_data: Dict = Depends(firebase
 
         # Log before running the agent
         logger.info("Initializing AI agent with dependencies")
-        
+
         try:
             # Run the AI agent
             result = await clarke_agent.run(
@@ -177,16 +177,16 @@ async def chat_endpoint(request: ChatRequest, user_data: Dict = Depends(firebase
 
         # Save to Firestore
         messages_ref = conversation_ref.collection('messages')
-        
+
         # DON'T save messages here - the frontend handles this with proper formatting
         # We only want to update the conversation metadata
-        
+
         # messages_ref.add({
         #     "role": "user",
         #     "content": request.message,
         #     "timestamp": datetime.now(central_tz)
         # })
-        
+
         # messages_ref.add({
         #     "role": "assistant",
         #     "content": validated_result.content,
